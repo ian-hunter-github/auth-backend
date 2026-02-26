@@ -34,7 +34,9 @@ async function waitForHealthy(baseUrl: string, timeoutMs: number) {
     try {
       const res = await fetch(`${baseUrl}/.netlify/functions/health`);
       if (res.ok) return;
-    } catch {}
+    } catch {
+      // ignore: netlify dev may not be ready yet
+    }
     await sleep(250);
   }
   throw new Error("Timed out waiting for netlify dev");
@@ -84,7 +86,9 @@ export async function startNetlifyDev(): Promise<Harness> {
   } catch (err) {
     try {
       child.kill("SIGTERM");
-    } catch {}
+    } catch {
+      // ignore: child may already be exiting
+    }
 
     const original = err instanceof Error ? err.message : String(err);
     throw new Error(
