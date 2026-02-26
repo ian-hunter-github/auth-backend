@@ -1,3 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Run from repo root
+# Fix CI deploy build: netlify functions:build needs distinct --src and --functions (dest).
+# We'll build into "dist/functions" and keep netlify.toml functions directory as source for dev/runtime.
+
+mkdir -p dist/functions
+
+cat > package.json <<'EOF'
 {
   "name": "identity-backend-service",
   "version": "0.1.0",
@@ -31,3 +41,14 @@
     "vitest": "^2.1.8"
   }
 }
+EOF
+
+cat > .gitignore <<'EOF'
+node_modules/
+dist/
+.netlify/
+.env
+.env.*
+coverage/
+.DS_Store
+EOF
