@@ -16,10 +16,22 @@ function getSupabaseClient() {
   });
 }
 
-function toProfile(user: { id: string; email?: string | null; user_metadata?: any }): AuthUserProfile {
+function getUserMetadataName(userMetadata: unknown): string | undefined {
+  if (!userMetadata || typeof userMetadata !== "object") return undefined;
+  const obj = userMetadata as Record<string, unknown>;
+
+  const fullName = obj["full_name"];
+  if (typeof fullName === "string" && fullName.trim().length > 0) return fullName;
+
+  const name = obj["name"];
+  if (typeof name === "string" && name.trim().length > 0) return name;
+
+  return undefined;
+}
+
+function toProfile(user: { id: string; email?: string | null; user_metadata?: unknown }): AuthUserProfile {
   const username = user.email || user.id;
-  const displayName =
-    (user.user_metadata && (user.user_metadata.full_name || user.user_metadata.name)) || username;
+  const displayName = getUserMetadataName(user.user_metadata) || username;
 
   return {
     id: user.id,
