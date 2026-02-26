@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Identity Backend Service - Dashboard</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial,
+          "Apple Color Emoji", "Segoe UI Emoji";
+        line-height: 1.4;
+      }
+      body {
+        margin: 0;
+        padding: 24px;
+      }
+      .wrap {
+        max-width: 860px;
+        margin: 0 auto;
+      }
+      .row {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+      .card {
+        border: 1px solid rgba(127, 127, 127, 0.35);
+        border-radius: 12px;
+        padding: 16px;
+        margin: 12px 0;
+      }
+      label {
+        display: inline-flex;
+        flex-direction: column;
+        gap: 6px;
+        min-width: 220px;
+      }
+      input {
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid rgba(127, 127, 127, 0.4);
+        background: transparent;
+        color: inherit;
+      }
+      button {
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid rgba(127, 127, 127, 0.4);
+        background: transparent;
+        color: inherit;
+        cursor: pointer;
+      }
+      button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+      pre {
+        overflow: auto;
+        padding: 12px;
+        border-radius: 10px;
+        background: rgba(127, 127, 127, 0.12);
+        border: 1px solid rgba(127, 127, 127, 0.25);
+      }
+      .muted {
+        opacity: 0.8;
+      }
+      .pill {
+        display: inline-block;
+        padding: 4px 10px;
+        border-radius: 999px;
+        border: 1px solid rgba(127, 127, 127, 0.35);
+        font-size: 12px;
+      }
+      .ok {
+        border-color: rgba(0, 180, 120, 0.55);
+      }
+      .bad {
+        border-color: rgba(220, 60, 60, 0.55);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <script type="module">
+      import React, { useEffect, useMemo, useState } from "https://esm.sh/react@18.3.1";
+      import { createRoot } from "https://esm.sh/react-dom@18.3.1/client";
+
+      const SESSION_KEY = "ibs.session.v1";
+
+      function safeJsonParse(raw) {
+        try {
+          return JSON.parse(raw);
+        } catch {
+          return null;
+        }
+      }
+
+      function loadSession() {
+        const raw = localStorage.getItem(SESSION_KEY);
+        if (!raw) return null;
+        const v = safeJsonParse(raw);
+        if (!v || typeof v !== "object") return null;
+
+        const accessToken = v.accessToken;
+        const tokenType = v.tokenType;
+        if (typeof accessToken !== "string" || accessToken.trim().length === 0) return null;
+        if (tokenType !== "bearer") return null;
+
+        return {
+          accessToken,
+          tokenType: "bearer",
+          expiresAt: typeof v.expiresAt === "string" ? v.expiresAt : undefined,
+          refreshToken: typeof v.refreshToken === "string" ? v.refreshToken : undefined,
+        };
+      }
+
+      function saveSession(session) {
+        localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+      }
+
+      function clearSession() {
+        localStorage.removeItem(SESSION_KEY);
+      }
+
+      async function apiFetch(path, opts = {}) {
+        const res = await fetch(path, opts);
+        const text = await res.text();
+        const body = text ? safeJsonParse(text) : null;
+        return { res, body, rawText: text };
+      }
+
+      function JsonBlock({ value }) {
+        const txt = useMemo(() => JSON.stringify(value, null, 2), [value]);
+        return React.createElement("pre", null, txt);
+      }
+
+      function App() {
+        const [username, setUsername] = useState("demo");
+        const [password, setPassword] = useState("letmein");
+
+        const [session, setSession] = useState(null);
+        const [me, setMe] = useState(null);
+        const [lastCall, setLastCall] = useState(null);
+        const [busy, setBusy] = useState(false);
+
+        useEffect(() => {
+          const s = loadSession();
+          if (s) setSession(s);
+        }, []);
+
+        async function doLogin(e) {
+          e?.preventDefault?.();
+          setBusy(true);
+          setMe(null);
+
+          try {
+            const { res, body, rawText } = await apiFetch("/.netlify/functions/auth-login", {
+              method: "POST",
+              headers: {
+                "content-type": "application/json",
+                "x-request-id": "web-auth-login",
+              },
+              body: JSON.stringify({ username, password }),
+            });
+
+            setLastCall({
+              at: new Date().toISOString(),
+              endpoint: "POST /.netlify/functions/auth-login",
+              status: res.status,
+              ok: res.ok,
+              body: body ?? rawText,
+            });
+
+            if (!body || body.ok !== true || !body.data || !body.data.session) return;
+
+            const s = body.data.session;
+            saveSession(s);
+            setSession(s);
+          } finally {
+            setBusy(false);
+          }
+        }
+
+        async function doMe() {
+          if (!session) return;
+          setBusy(true);
+
+          try {
+            const { res, body, rawText } = await apiFetch("/.netlify/functions/me", {
+              method: "GET",
+              headers: {
+                authorization: `Bearer ${session.accessToken}`,
+                "x-request-id": "web-me",
+              },
+            });
+
+            setLastCall({
+              at: new Date().toISOString(),
+              endpoint: "GET /.netlify/functions/me",
+              status: res.status,
+              ok: res.ok,
+              body: body ?? rawText,
+            });
+
+            if (body && body.ok === true && body.data) {
+              setMe(body.data);
+            } else {
+              setMe(null);
+            }
+          } finally {
+            setBusy(false);
+          }
+        }
+
+        function doLogout() {
+          clearSession();
+          setSession(null);
+          setMe(null);
+          setLastCall(null);
+        }
+
+        const statusPill = session
+          ? React.createElement("span", { className: "pill ok" }, "SESSION: present")
+          : React.createElement("span", { className: "pill bad" }, "SESSION: none");
+
+        return React.createElement(
+          "div",
+          { className: "wrap" },
+          React.createElement("h1", null, "Minimal Dashboard"),
+          React.createElement(
+            "p",
+            { className: "muted" },
+            "Calls Netlify Functions on the same origin. In Netlify Dev, auth defaults to the fake provider."
+          ),
+          React.createElement("div", { className: "row" }, statusPill),
+          React.createElement(
+            "div",
+            { className: "card" },
+            React.createElement("h2", null, "Login"),
+            React.createElement(
+              "form",
+              { onSubmit: doLogin },
+              React.createElement(
+                "div",
+                { className: "row" },
+                React.createElement(
+                  "label",
+                  null,
+                  React.createElement("span", null, "Username"),
+                  React.createElement("input", {
+                    value: username,
+                    onChange: (e) => setUsername(e.target.value),
+                    autoComplete: "username",
+                    spellCheck: false,
+                  })
+                ),
+                React.createElement(
+                  "label",
+                  null,
+                  React.createElement("span", null, "Password"),
+                  React.createElement("input", {
+                    value: password,
+                    onChange: (e) => setPassword(e.target.value),
+                    type: "password",
+                    autoComplete: "current-password",
+                  })
+                ),
+                React.createElement(
+                  "div",
+                  { style: { display: "flex", gap: "8px", alignItems: "end" } },
+                  React.createElement(
+                    "button",
+                    { type: "submit", disabled: busy },
+                    busy ? "Working..." : "Login (POST /auth-login)"
+                  ),
+                  React.createElement(
+                    "button",
+                    { type: "button", onClick: doLogout, disabled: busy || !session },
+                    "Logout"
+                  )
+                )
+              )
+            )
+          ),
+          React.createElement(
+            "div",
+            { className: "card" },
+            React.createElement("h2", null, "/me"),
+            React.createElement(
+              "div",
+              { className: "row" },
+              React.createElement(
+                "button",
+                { type: "button", onClick: doMe, disabled: busy || !session },
+                busy ? "Working..." : "Fetch profile (GET /me)"
+              )
+            ),
+            me
+              ? React.createElement(
+                  React.Fragment,
+                  null,
+                  React.createElement("h3", null, "Profile"),
+                  React.createElement(JsonBlock, { value: me })
+                )
+              : React.createElement("p", { className: "muted" }, "No profile loaded yet.")
+          ),
+          React.createElement(
+            "div",
+            { className: "card" },
+            React.createElement("h2", null, "Last call"),
+            lastCall
+              ? React.createElement(JsonBlock, { value: lastCall })
+              : React.createElement("p", { className: "muted" }, "No calls yet.")
+          ),
+          React.createElement(
+            "p",
+            { className: "muted" },
+            "Tip: run ",
+            React.createElement("code", null, "npm run dev"),
+            " then open the Netlify Dev URL; use demo / letmein."
+          )
+        );
+      }
+
+      createRoot(document.getElementById("root")).render(React.createElement(App));
+    </script>
+  </body>
+</html>
