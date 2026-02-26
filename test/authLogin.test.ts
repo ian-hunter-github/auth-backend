@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startNetlifyDev } from "./netlifyDevHarness.js";
+import type { SuccessEnvelope, ErrorEnvelope } from "../src/lib/response.js";
+import type { AuthLoginResponse } from "../src/contracts/auth.js";
 
 let harness: Awaited<ReturnType<typeof startNetlifyDev>> | undefined;
 
@@ -25,7 +27,7 @@ describe("POST /.netlify/functions/auth-login", () => {
     });
 
     expect(res.status).toBe(401);
-    const body = await res.json();
+    const body = (await res.json()) as ErrorEnvelope;
     expect(body.ok).toBe(false);
     expect(body.error.code).toBe("UNAUTHORIZED");
   });
@@ -43,7 +45,7 @@ describe("POST /.netlify/functions/auth-login", () => {
     });
 
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as SuccessEnvelope<AuthLoginResponse>;
     expect(body.ok).toBe(true);
     expect(body.data.user.username).toBe("demo");
   });

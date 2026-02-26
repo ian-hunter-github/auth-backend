@@ -3,7 +3,7 @@ export const PROJECT = {
   version: "0.1.0"
 };
 
-export function getBuildInfo() {
+export function getBuildInfo(): { sha?: string; buildId?: string; node: string } {
   const sha =
     process.env.GITHUB_SHA ||
     process.env.NETLIFY_COMMIT_REF ||
@@ -13,8 +13,8 @@ export function getBuildInfo() {
   const buildId = process.env.GITHUB_RUN_ID || process.env.BUILD_ID || undefined;
 
   return {
-    sha,
-    buildId,
-    node: process.version
+    node: process.version,
+    ...(sha ? { sha } : {}),
+    ...(buildId ? { buildId } : {})
   };
 }

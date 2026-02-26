@@ -17,8 +17,10 @@ async function isPortFree(port: number): Promise<boolean> {
   });
 }
 
-async function pickPort(preferred: number): Promise<number> {
+async function pickPort(preferred: number, opts?: { exclude?: Set<number> }): Promise<number> {
+  const exclude = opts?.exclude ?? new Set<number>();
   for (let p = preferred; p < preferred + 200; p++) {
+    if (exclude.has(p)) continue;
     if (await isPortFree(p)) return p;
   }
   throw new Error(`No free port found near ${preferred}`);
@@ -47,7 +49,11 @@ export async function startNetlifyDev(): Promise<Harness> {
   const preferredStaticPort = Number(process.env.NETLIFY_STATIC_PORT || "4000");
 
   const proxyPort = await pickPort(preferredProxyPort);
-  const staticPort = await pickPort(preferredStaticPort);
+
+  const staticPreferred =
+    preferredStaticPort === proxyPort ? preferredStaticPort + 1 : preferredStaticPort;
+
+  const staticPort = await pickPort(staticPreferred, { exclude: new Set([proxyPort]) });
 
   const child = spawn(
     process.platform === "win32" ? "npx.cmd" : "npx",
