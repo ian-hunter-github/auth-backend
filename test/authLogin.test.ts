@@ -1,18 +1,20 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startNetlifyDev } from "./netlifyDevHarness.js";
 
-let harness: Awaited<ReturnType<typeof startNetlifyDev>>;
+let harness: Awaited<ReturnType<typeof startNetlifyDev>> | undefined;
 
 beforeAll(async () => {
   harness = await startNetlifyDev();
 });
 
 afterAll(async () => {
-  await harness.stop();
+  await harness?.stop();
 });
 
 describe("POST /.netlify/functions/auth-login", () => {
   it("rejects invalid credentials", async () => {
+    if (!harness) throw new Error("Harness not started");
+
     const res = await fetch(`${harness.baseUrl}/.netlify/functions/auth-login`, {
       method: "POST",
       headers: {
@@ -29,6 +31,8 @@ describe("POST /.netlify/functions/auth-login", () => {
   });
 
   it("accepts demo/letmein", async () => {
+    if (!harness) throw new Error("Harness not started");
+
     const res = await fetch(`${harness.baseUrl}/.netlify/functions/auth-login`, {
       method: "POST",
       headers: {

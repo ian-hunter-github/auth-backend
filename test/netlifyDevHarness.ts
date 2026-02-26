@@ -18,7 +18,7 @@ async function isPortFree(port: number): Promise<boolean> {
 }
 
 async function pickPort(preferred: number): Promise<number> {
-  for (let p = preferred; p < preferred + 50; p++) {
+  for (let p = preferred; p < preferred + 200; p++) {
     if (await isPortFree(p)) return p;
   }
   throw new Error(`No free port found near ${preferred}`);
@@ -41,20 +41,56 @@ async function waitForHealthy(baseUrl: string, timeoutMs: number) {
 }
 
 export async function startNetlifyDev(): Promise<Harness> {
-  const preferred = Number(process.env.NETLIFY_DEV_PORT || "3999");
-  const port = await pickPort(preferred);
+  const preferredProxyPort = Number(process.env.NETLIFY_DEV_PORT || "3999");
+  const preferredStaticPort = Number(process.env.NETLIFY_STATIC_PORT || "4000");
+
+  const proxyPort = await pickPort(preferredProxyPort);
+  const staticPort = await pickPort(preferredStaticPort);
 
   const child = spawn(
     process.platform === "win32" ? "npx.cmd" : "npx",
-    ["netlify", "dev", "--offline", "--port", String(port), "--no-open"],
+    [
+      "netlify",
+      "dev",
+      "--offline",
+      "--no-open",
+      "--port",
+      String(proxyPort),
+      "--staticServerPort",
+      String(staticPort)
+    ],
     {
       stdio: "pipe",
-      env: { ...process.env, NETLIFY_DEV: "true" }
+      env: {
+        ...process.env,
+        NETLIFY_DEV: "true",
+        NETLIFY_TELEMETRY_DISABLED: "1"
+      }
     }
   );
 
-  const baseUrl = `http://127.0.0.1:${port}`;
-  await waitForHealthy(baseUrl, 30000);
+  let output = "";
+  child.stdout.on("data", (d) => {
+    output += d.toString();
+  });
+  child.stderr.on("data", (d) => {
+    output += d.toString();
+  });
+
+  const baseUrl = `http://127.0.0.1:${proxyPort}`;
+
+  try {
+    await waitForHealthy(baseUrl, 90000);
+  } catch (err) {
+    try {
+      child.kill("SIGTERM");
+    } catch {}
+
+    const original = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `Failed to start netlify dev.\n\nBase URL: ${baseUrl}\nProxy port: ${proxyPort}\nStatic port: ${staticPort}\n\nOriginal error: ${original}\n\nnetlify dev output:\n${output}\n`
+    );
+  }
 
   return {
     baseUrl,

@@ -7,5 +7,8 @@
 [dev]
   framework = "#static"
   functions = "netlify/functions"
+  # Netlify Dev proxy port (where you hit /.netlify/functions/*)
   port = 3999
+  # Simple static server port (Netlify CLI ignores targetPort in #static mode)
+  staticServerPort = 4000
   autoLaunch = false

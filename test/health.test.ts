@@ -1,18 +1,20 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startNetlifyDev } from "./netlifyDevHarness.js";
 
-let harness: Awaited<ReturnType<typeof startNetlifyDev>>;
+let harness: Awaited<ReturnType<typeof startNetlifyDev>> | undefined;
 
 beforeAll(async () => {
   harness = await startNetlifyDev();
 });
 
 afterAll(async () => {
-  await harness.stop();
+  await harness?.stop();
 });
 
 describe("GET /.netlify/functions/health", () => {
   it("returns ok envelope", async () => {
+    if (!harness) throw new Error("Harness not started");
+
     const res = await fetch(`${harness.baseUrl}/.netlify/functions/health`, {
       headers: { "x-request-id": "test-health-001" }
     });
