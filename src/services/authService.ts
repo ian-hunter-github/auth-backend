@@ -5,8 +5,20 @@ import { supabaseAuthProvider } from "./supabaseAuthProvider.js";
 import { getEnv } from "../lib/env.js";
 
 function selectProvider(): AuthProvider {
-  const p = (getEnv("AUTH_PROVIDER") || "supabase").toLowerCase();
-  if (p === "fake") return fakeAuthProvider;
+  const explicit = getEnv("AUTH_PROVIDER");
+  if (explicit) {
+    const p = explicit.toLowerCase();
+    if (p === "fake") return fakeAuthProvider;
+    return supabaseAuthProvider;
+  }
+
+  // Deterministic default:
+  // - In local Netlify Dev / test harness runs, default to FAKE unless explicitly overridden.
+  // - In deployed environments, default to Supabase.
+  const isNetlifyDev = (getEnv("NETLIFY_DEV") || "").toLowerCase() === "true";
+  const isTest = (getEnv("NODE_ENV") || "").toLowerCase() === "test";
+
+  if (isNetlifyDev || isTest) return fakeAuthProvider;
   return supabaseAuthProvider;
 }
 
