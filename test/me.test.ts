@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startNetlifyDev } from "./netlifyDevHarness.js";
 import type { SuccessEnvelope, ErrorEnvelope } from "../src/lib/response.js";
-import type { AuthLoginResponse } from "../src/contracts/auth.js";
+import type { MeResponse } from "../src/contracts/me.js";
 
 let harness: Awaited<ReturnType<typeof startNetlifyDev>> | undefined;
 
@@ -16,17 +16,12 @@ afterAll(async () => {
   await harness?.stop();
 });
 
-describe("POST /.netlify/functions/auth-login", () => {
-  it("rejects invalid credentials", async () => {
+describe("GET /.netlify/functions/me", () => {
+  it("rejects missing auth header", async () => {
     if (!harness) throw new Error("Harness not started");
 
-    const res = await fetch(`${harness.baseUrl}/.netlify/functions/auth-login`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-request-id": "test-auth-401"
-      },
-      body: JSON.stringify({ username: "demo", password: "bad" })
+    const res = await fetch(`${harness.baseUrl}/.netlify/functions/me`, {
+      headers: { "x-request-id": "test-me-401a" }
     });
 
     expect(res.status).toBe(401);
@@ -35,22 +30,19 @@ describe("POST /.netlify/functions/auth-login", () => {
     expect(body.error.code).toBe("UNAUTHORIZED");
   });
 
-  it("accepts demo/letmein", async () => {
+  it("returns profile for valid token", async () => {
     if (!harness) throw new Error("Harness not started");
 
-    const res = await fetch(`${harness.baseUrl}/.netlify/functions/auth-login`, {
-      method: "POST",
+    const res = await fetch(`${harness.baseUrl}/.netlify/functions/me`, {
       headers: {
-        "content-type": "application/json",
-        "x-request-id": "test-auth-200"
-      },
-      body: JSON.stringify({ username: "demo", password: "letmein" })
+        authorization: "Bearer fake-jwt-token.demo",
+        "x-request-id": "test-me-200"
+      }
     });
 
     expect(res.status).toBe(200);
-    const body = (await res.json()) as SuccessEnvelope<AuthLoginResponse>;
+    const body = (await res.json()) as SuccessEnvelope<MeResponse>;
     expect(body.ok).toBe(true);
     expect(body.data.user.username).toBe("demo");
-    expect(typeof body.data.token).toBe("string");
   });
 });

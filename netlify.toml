@@ -1,14 +1,9 @@
 [build]
   functions = "netlify/functions"
 
-[functions]
-  node_bundler = "esbuild"
-
 [dev]
   framework = "#static"
   functions = "netlify/functions"
-  # Netlify Dev proxy port (where you hit /.netlify/functions/*)
   port = 3999
-  # Simple static server port (Netlify CLI ignores targetPort in #static mode)
-  staticServerPort = 4000
+  staticServerPort = 49000
   autoLaunch = false

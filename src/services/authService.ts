@@ -1,29 +1,19 @@
-import { AppError } from "../lib/errors.js";
-import type { AuthLoginRequest, AuthLoginResponse } from "../contracts/auth.js";
+import type { AuthLoginRequest, AuthLoginResponse, AuthUserProfile } from "../contracts/auth.js";
+import type { AuthProvider } from "./authProvider.js";
+import { fakeAuthProvider } from "./fakeAuthProvider.js";
+import { supabaseAuthProvider } from "./supabaseAuthProvider.js";
+import { getEnv } from "../lib/env.js";
+
+function selectProvider(): AuthProvider {
+  const p = (getEnv("AUTH_PROVIDER") || "supabase").toLowerCase();
+  if (p === "fake") return fakeAuthProvider;
+  return supabaseAuthProvider;
+}
 
 export async function login(req: AuthLoginRequest): Promise<AuthLoginResponse> {
-  const username = (req.username || "").trim();
-  const password = req.password || "";
+  return selectProvider().login(req);
+}
 
-  if (!username || !password) {
-    throw new AppError("username and password are required", {
-      code: "BAD_REQUEST",
-      status: 400,
-      details: { fields: ["username", "password"] }
-    });
-  }
-
-  if (!(username === "demo" && password === "letmein")) {
-    throw new AppError("Invalid credentials", { code: "UNAUTHORIZED", status: 401 });
-  }
-
-  return {
-    token: "fake-jwt-token.demo",
-    user: {
-      id: "user_demo_001",
-      username: "demo",
-      displayName: "Demo User",
-      roles: ["user"]
-    }
-  };
+export async function getUserFromToken(token: string): Promise<AuthUserProfile> {
+  return selectProvider().getUserFromToken(token);
 }

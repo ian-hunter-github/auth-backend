@@ -7,7 +7,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "dev": "netlify dev",
+    "dev": "netlify dev --port 3999 --staticServerPort 49000",
     "build": "netlify functions:build --src netlify/functions --functions dist/functions",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
@@ -16,6 +16,9 @@
     "test:run": "vitest run",
     "ci": "npm run lint && npm run typecheck && npm run test:run",
     "check:ci": "./scripts/check-ci.sh"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.9.0",
