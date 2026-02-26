@@ -50,7 +50,10 @@ describe("POST /.netlify/functions/auth-login", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as SuccessEnvelope<AuthLoginResponse>;
     expect(body.ok).toBe(true);
+
+    expect(body.data.provider).toBe("fake");
     expect(body.data.user.username).toBe("demo");
-    expect(typeof body.data.token).toBe("string");
+    expect(typeof body.data.session.accessToken).toBe("string");
+    expect(body.data.session.tokenType).toBe("bearer");
   });
 });

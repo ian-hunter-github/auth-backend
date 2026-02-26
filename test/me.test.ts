@@ -35,7 +35,7 @@ describe("GET /.netlify/functions/me", () => {
 
     const res = await fetch(`${harness.baseUrl}/.netlify/functions/me`, {
       headers: {
-        authorization: "Bearer fake-jwt-token.demo",
+        authorization: "Bearer fake-access-token.demo",
         "x-request-id": "test-me-200"
       }
     });

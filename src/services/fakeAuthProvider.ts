@@ -9,6 +9,8 @@ const DEMO_USER: AuthUserProfile = {
   roles: ["user"]
 };
 
+const FAKE_ACCESS_TOKEN = "fake-access-token.demo";
+
 export const fakeAuthProvider: AuthProvider = {
   login: async (req: AuthLoginRequest): Promise<AuthLoginResponse> => {
     const username = (req.username || "").trim();
@@ -27,7 +29,11 @@ export const fakeAuthProvider: AuthProvider = {
     }
 
     return {
-      token: "fake-jwt-token.demo",
+      provider: "fake",
+      session: {
+        accessToken: FAKE_ACCESS_TOKEN,
+        tokenType: "bearer"
+      },
       user: DEMO_USER
     };
   },
@@ -37,7 +43,7 @@ export const fakeAuthProvider: AuthProvider = {
     if (!t) {
       throw new AppError("Missing token", { code: "UNAUTHORIZED", status: 401 });
     }
-    if (t !== "fake-jwt-token.demo") {
+    if (t !== FAKE_ACCESS_TOKEN) {
       throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
     }
     return DEMO_USER;

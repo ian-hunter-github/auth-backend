@@ -69,15 +69,26 @@ export const supabaseAuthProvider: AuthProvider = {
       });
     }
 
-    const token = data.session?.access_token;
+    const accessToken = data.session?.access_token;
+    const refreshToken = data.session?.refresh_token;
+    const expiresAtSeconds = data.session?.expires_at;
     const user = data.user;
 
-    if (!token || !user) {
+    if (!accessToken || !user) {
       throw new AppError("Auth login failed", { code: "INTERNAL_ERROR", status: 500 });
     }
 
+    const expiresAt =
+      typeof expiresAtSeconds === "number" ? new Date(expiresAtSeconds * 1000).toISOString() : undefined;
+
     return {
-      token,
+      provider: "supabase",
+      session: {
+        accessToken,
+        tokenType: "bearer",
+        ...(expiresAt ? { expiresAt } : {}),
+        ...(refreshToken ? { refreshToken } : {})
+      },
       user: toProfile(user)
     };
   },

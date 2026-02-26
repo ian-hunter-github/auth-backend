@@ -10,7 +10,17 @@ export type AuthUserProfile = {
   roles: string[];
 };
 
+export type AuthSession = {
+  accessToken: string;
+  tokenType: "bearer";
+  expiresAt?: string;
+  refreshToken?: string;
+};
+
+export type AuthProviderId = "fake" | "supabase" | "google" | "github";
+
 export type AuthLoginResponse = {
-  token: string;
+  provider: AuthProviderId;
+  session: AuthSession;
   user: AuthUserProfile;
 };
