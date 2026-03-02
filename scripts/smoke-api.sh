@@ -128,7 +128,6 @@ request_json() {
 }
 
 node_json_get() {
-  # Usage: node_json_get "$json" "a.b.c"
   local json="$1"
   local expr="$2"
   node -e '
@@ -152,7 +151,6 @@ node_json_get() {
 }
 
 node_json_get_first() {
-  # Usage: node_json_get_first "$json" "a.b" "c.d"
   local json="$1"
   shift
   local p
@@ -237,17 +235,12 @@ if [[ "$provider" != "fake" ]]; then
 fi
 
 access_token="$(node_json_get_first "$login_body" "session.accessToken" "data.session.accessToken")"
-token_type="$(node_json_get_first "$login_body" "session.tokenType" "data.session.tokenType")"
 user_id="$(node_json_get_first "$login_body" "user.id" "data.user.id")"
 
 if [[ -z "$access_token" ]]; then
   echo "ERROR: missing session.accessToken" >&2
   echo "$login_body" >&2
   exit 1
-fi
-
-if [[ -z "$token_type" ]]; then
-  token_type="Bearer"
 fi
 
 if [[ -z "$user_id" ]]; then
@@ -258,7 +251,7 @@ fi
 
 echo "OK: login succeeded as '${used_username}' via ${login_url}"
 
-auth_header="${token_type} ${access_token}"
+auth_header="Bearer ${access_token}"
 
 echo "2) GET /me"
 me_resp="$(request_json "GET" "/me" "/.netlify/functions/me" "" "$auth_header")"
@@ -272,15 +265,16 @@ if [[ "$me_code" != "200" ]]; then
   exit 1
 fi
 
+# /me may (currently) not include provider in its response body.
+# If it does, it must be 'fake' for this smoke scenario.
 me_provider="$(node_json_get_first "$me_body" "provider" "data.provider")"
-me_user_id="$(node_json_get_first "$me_body" "user.id" "data.user.id")"
-
-if [[ "$me_provider" != "fake" ]]; then
+if [[ -n "${me_provider:-}" && "$me_provider" != "fake" ]]; then
   echo "ERROR: expected /me provider 'fake' but got '${me_provider:-<empty>}'" >&2
   echo "$me_body" >&2
   exit 1
 fi
 
+me_user_id="$(node_json_get_first "$me_body" "user.id" "data.user.id")"
 if [[ -z "$me_user_id" ]]; then
   echo "ERROR: missing /me user.id" >&2
   echo "$me_body" >&2

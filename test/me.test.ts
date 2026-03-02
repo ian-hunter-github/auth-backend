@@ -45,4 +45,20 @@ describe("GET /.netlify/functions/me", () => {
     expect(body.ok).toBe(true);
     expect(body.data.user.username).toBe("demo");
   });
+
+  it("accepts lowercase bearer scheme", async () => {
+    if (!harness) throw new Error("Harness not started");
+
+    const res = await fetch(`${harness.baseUrl}/.netlify/functions/me`, {
+      headers: {
+        authorization: "bearer fake-access-token.demo",
+        "x-request-id": "test-me-200b"
+      }
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as SuccessEnvelope<MeResponse>;
+    expect(body.ok).toBe(true);
+    expect(body.data.user.username).toBe("demo");
+  });
 });
