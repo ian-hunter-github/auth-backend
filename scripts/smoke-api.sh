@@ -12,12 +12,15 @@ set -euo pipefail
 #
 # Optional env vars:
 #   BASE_URL   (default: http://localhost:3999)
-#   USERNAME   (default: demo)
-#   PASSWORD   (default: letmein)
+#   USERNAME   (if set, used as the only username attempted)
+#   PASSWORD   (if set, used as the only password attempted)
+#
+# If USERNAME/PASSWORD are NOT set, the script will try a small set of common demo
+# credential pairs until one succeeds.
+#
+# If AUTH_FAKE_USERNAME/AUTH_FAKE_PASSWORD are set, they are tried first.
 
 BASE_URL="${BASE_URL:-http://localhost:3999}"
-USERNAME="${USERNAME:-demo}"
-PASSWORD="${PASSWORD:-letmein}"
 
 if ! command -v curl >/dev/null 2>&1; then
   echo "ERROR: curl is required" >&2
@@ -96,7 +99,7 @@ request_json() {
   code="$(do_curl "$url_fn")"
   used_url="$url_fn"
 
-  # Retry on routing/method issues (common when pretty routes are handled by static server)
+  # Retry on routing/method issues
   if [[ "$code" == "404" || "$code" == "000" || "$code" == "405" ]]; then
     code="$(do_curl "$url_pretty")"
     used_url="$url_pretty"
@@ -130,19 +133,85 @@ node_json_get() {
   ' "$expr"
 }
 
+make_login_payload() {
+  local u="$1"
+  local p="$2"
+  node -e 'process.stdout.write(JSON.stringify({ username: process.argv[1], password: process.argv[2] }))' "$u" "$p"
+}
+
 echo "Smoke test (fake): BASE_URL=$BASE_URL"
 
-login_payload="$(node -e 'process.stdout.write(JSON.stringify({ username: process.argv[1], password: process.argv[2] }))' "$USERNAME" "$PASSWORD")"
+# Candidate credential pairs (username|password)
+# If USERNAME and PASSWORD are set, try only that.
+candidates=()
+
+if [[ -n "${USERNAME:-}" || -n "${PASSWORD:-}" ]]; then
+  if [[ -z "${USERNAME:-}" || -z "${PASSWORD:-}" ]]; then
+    echo "ERROR: if you set USERNAME or PASSWORD, you must set both." >&2
+    exit 2
+  fi
+  candidates+=("${USERNAME}|${PASSWORD}")
+else
+  if [[ -n "${AUTH_FAKE_USERNAME:-}" && -n "${AUTH_FAKE_PASSWORD:-}" ]]; then
+    candidates+=("${AUTH_FAKE_USERNAME}|${AUTH_FAKE_PASSWORD}")
+  fi
+
+  # Known fake provider demo creds (repo default is demo/letmein)
+  candidates+=("demo|letmein")
+  candidates+=("demo|password")
+  candidates+=("demo@example.com|letmein")
+  candidates+=("demo@example.com|password")
+  candidates+=("test|test")
+  candidates+=("test@example.com|test")
+fi
+
+login_code=""
+login_url=""
+login_body=""
+used_username=""
 
 echo "1) POST /auth-login"
-login_resp="$(request_json "POST" "/auth-login" "/.netlify/functions/auth-login" "$login_payload")"
-login_url="$(printf '%s' "$login_resp" | sed -n '1p')"
-login_code="$(printf '%s' "$login_resp" | sed -n '2p')"
-login_body="$(printf '%s' "$login_resp" | sed -n '3,$p')"
+last_code=""
+last_url=""
+last_body=""
+
+for pair in "${candidates[@]}"; do
+  u="${pair%%|*}"
+  p="${pair##*|}"
+
+  payload="$(make_login_payload "$u" "$p")"
+
+  resp="$(request_json "POST" "/auth-login" "/.netlify/functions/auth-login" "$payload")"
+  url="$(printf '%s' "$resp" | sed -n '1p')"
+  code="$(printf '%s' "$resp" | sed -n '2p')"
+  body="$(printf '%s' "$resp" | sed -n '3,$p')"
+
+  last_code="$code"
+  last_url="$url"
+  last_body="$body"
+
+  if [[ "$code" == "200" ]]; then
+    login_code="$code"
+    login_url="$url"
+    login_body="$body"
+    used_username="$u"
+    break
+  fi
+done
 
 if [[ "$login_code" != "200" ]]; then
-  echo "ERROR: login failed (${login_code}) at ${login_url}" >&2
-  echo "$login_body" >&2
+  echo "ERROR: login failed (last attempt: ${last_code:-<none>}) at ${last_url:-<none>}" >&2
+  echo "${last_body:-<no body>}" >&2
+  echo "" >&2
+  echo "Tried credential pairs:" >&2
+  for pair in "${candidates[@]}"; do
+    echo "  - ${pair%%|*} / ${pair##*|}" >&2
+  done
+  echo "" >&2
+  echo "Tips:" >&2
+  echo "  - If you started netlify dev on a different port, set BASE_URL (e.g. BASE_URL=http://localhost:4095)." >&2
+  echo "  - If your fake provider uses different demo creds, set USERNAME and PASSWORD explicitly." >&2
+  echo "  - Or set AUTH_FAKE_USERNAME and AUTH_FAKE_PASSWORD and re-run." >&2
   exit 1
 fi
 
@@ -172,6 +241,8 @@ if [[ -z "$user_id" ]]; then
   echo "$login_body" >&2
   exit 1
 fi
+
+echo "OK: login succeeded as '${used_username}' via ${login_url}"
 
 auth_header="${token_type} ${access_token}"
 
