@@ -14,6 +14,7 @@
     "format": "prettier --write .",
     "test": "vitest",
     "test:run": "vitest run",
+    "test:supabase-smoke": "RUN_SUPABASE_SMOKE=1 vitest run test/supabaseAuth.smoke.test.ts",
     "ci": "npm run lint && npm run typecheck && npm run test:run",
     "check:ci": "./scripts/check-ci.sh"
   },
