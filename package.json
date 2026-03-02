@@ -16,7 +16,8 @@
     "test:run": "vitest run",
     "test:supabase-smoke": "RUN_SUPABASE_SMOKE=1 vitest run test/supabaseAuth.smoke.test.ts",
     "ci": "npm run lint && npm run typecheck && npm run test:run",
-    "check:ci": "./scripts/check-ci.sh"
+    "check:ci": "./scripts/check-ci.sh",
+    "api:docs": "./scripts/api-docs.sh"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.1"
@@ -24,6 +25,7 @@
   "devDependencies": {
     "@eslint/js": "^9.9.0",
     "@netlify/functions": "^2.8.0",
+    "@redocly/cli": "^2.20.1",
     "@types/node": "^22.10.2",
     "@typescript-eslint/eslint-plugin": "^8.10.0",
     "@typescript-eslint/parser": "^8.10.0",
@@ -33,6 +35,7 @@
     "netlify-cli": "^18.0.0",
     "prettier": "^3.3.3",
     "typescript": "^5.6.3",
-    "vitest": "^2.1.8"
+    "vitest": "^2.1.8",
+    "widdershins": "^4.0.1"
   }
 }
