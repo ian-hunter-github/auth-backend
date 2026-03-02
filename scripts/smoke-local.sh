@@ -21,7 +21,7 @@ set -euo pipefail
 #   READY_SLEEP_S    (default: 0.35)
 #
 # Also supports any env vars accepted by scripts/smoke-api.sh:
-#   USERNAME, PASSWORD
+#   SMOKE_USERNAME, SMOKE_PASSWORD
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"

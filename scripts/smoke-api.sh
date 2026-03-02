@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+DEBUG=0
+if [[ "${1:-}" == "--debug" ]]; then
+  DEBUG=1
+fi
+
 # Smoke test (scheme A): Fake provider only.
 #
 # Assumptions:
@@ -8,17 +13,12 @@ set -euo pipefail
 # - Fake auth provider is active (default)
 #
 # Usage:
-#   scripts/smoke-api.sh
+#   scripts/smoke-api.sh [--debug]
 #
 # Optional env vars:
 #   BASE_URL   (default: http://localhost:3999)
-#   USERNAME   (if set, used as the only username attempted)
-#   PASSWORD   (if set, used as the only password attempted)
-#
-# If USERNAME/PASSWORD are NOT set, the script will try a small set of common demo
-# credential pairs until one succeeds.
-#
-# If AUTH_FAKE_USERNAME/AUTH_FAKE_PASSWORD are set, they are tried first.
+#   SMOKE_USERNAME   (if set, used as the only username attempted)
+#   SMOKE_PASSWORD   (if set, used as the only password attempted)
 #
 # Response envelope:
 # - Supports both shapes:
@@ -47,8 +47,6 @@ join_url() {
   printf '%s%s' "$base" "$path"
 }
 
-# Prefer function routes first (Netlify dev always supports these).
-# Fall back to pretty routes if configured.
 request_json() {
   local method="$1"
   local pretty_path="$2"
@@ -70,6 +68,16 @@ request_json() {
   do_curl() {
     local url="$1"
     local out_code=""
+
+    if [[ "$DEBUG" -eq 1 ]]; then
+      echo "[DEBUG] curl $method $url" >&2
+      if [[ -n "$data" ]]; then
+        echo "[DEBUG] payload: $data" >&2
+      fi
+      if [[ -n "$auth_header" ]]; then
+        echo "[DEBUG] auth: $auth_header" >&2
+      fi
+    fi
 
     if [[ -n "$data" ]]; then
       if [[ -n "$auth_header" ]]; then
@@ -100,14 +108,18 @@ request_json() {
     printf '%s' "$out_code"
   }
 
-  # 1) Try function URL first
   code="$(do_curl "$url_fn")"
   used_url="$url_fn"
 
-  # Retry on routing/method issues
   if [[ "$code" == "404" || "$code" == "000" || "$code" == "405" ]]; then
     code="$(do_curl "$url_pretty")"
     used_url="$url_pretty"
+  fi
+
+  if [[ "$DEBUG" -eq 1 ]]; then
+    echo "[DEBUG] response code: $code" >&2
+    echo "[DEBUG] response body:" >&2
+    cat "$tmp_body" >&2
   fi
 
   printf '%s\n' "$used_url"
@@ -116,11 +128,12 @@ request_json() {
 }
 
 node_json_get() {
-  local expr="$1"
+  # Usage: node_json_get "$json" "a.b.c"
+  local json="$1"
+  local expr="$2"
   node -e '
-    const fs = require("fs");
     const expr = process.argv[1];
-    const raw = fs.readFileSync(0, "utf8");
+    const raw = process.argv[2] ?? "";
     let j;
     try { j = JSON.parse(raw); } catch { process.exit(2); }
     function get(obj, path) {
@@ -135,14 +148,16 @@ node_json_get() {
     const v = get(j, expr);
     if (v === undefined || v === null) process.stdout.write("");
     else process.stdout.write(String(v));
-  ' "$expr"
+  ' "$expr" "$json"
 }
 
 node_json_get_first() {
-  # Usage: echo "$json" | node_json_get_first "a.b" "c.d"
+  # Usage: node_json_get_first "$json" "a.b" "c.d"
+  local json="$1"
+  shift
   local p
   for p in "$@"; do
-    val="$(node_json_get "$p")" || true
+    val="$(node_json_get "$json" "$p")" || true
     if [[ -n "${val:-}" ]]; then
       printf '%s' "$val"
       return 0
@@ -160,35 +175,25 @@ make_login_payload() {
 
 echo "Smoke test (fake): BASE_URL=$BASE_URL"
 
-# Candidate credential pairs (username|password)
-# If USERNAME and PASSWORD are set, try only that.
 candidates=()
 
-if [[ -n "${USERNAME:-}" || -n "${PASSWORD:-}" ]]; then
-  if [[ -z "${USERNAME:-}" || -z "${PASSWORD:-}" ]]; then
-    echo "ERROR: if you set USERNAME or PASSWORD, you must set both." >&2
+if [[ -n "${SMOKE_USERNAME:-}" || -n "${SMOKE_PASSWORD:-}" ]]; then
+  if [[ -z "${SMOKE_USERNAME:-}" || -z "${SMOKE_PASSWORD:-}" ]]; then
+    echo "ERROR: if you set SMOKE_USERNAME or SMOKE_PASSWORD, you must set both." >&2
     exit 2
   fi
-  candidates+=("${USERNAME}|${PASSWORD}")
+  candidates+=("${SMOKE_USERNAME}|${SMOKE_PASSWORD}")
 else
-  if [[ -n "${AUTH_FAKE_USERNAME:-}" && -n "${AUTH_FAKE_PASSWORD:-}" ]]; then
-    candidates+=("${AUTH_FAKE_USERNAME}|${AUTH_FAKE_PASSWORD}")
-  fi
-
   candidates+=("demo|letmein")
-  candidates+=("demo|password")
-  candidates+=("demo@example.com|letmein")
-  candidates+=("demo@example.com|password")
-  candidates+=("test|test")
-  candidates+=("test@example.com|test")
 fi
 
 login_code=""
-login_url=""
 login_body=""
+login_url=""
 used_username=""
 
 echo "1) POST /auth-login"
+
 last_code=""
 last_url=""
 last_body=""
@@ -220,29 +225,20 @@ done
 if [[ "$login_code" != "200" ]]; then
   echo "ERROR: login failed (last attempt: ${last_code:-<none>}) at ${last_url:-<none>}" >&2
   echo "${last_body:-<no body>}" >&2
-  echo "" >&2
-  echo "Tried credential pairs:" >&2
-  for pair in "${candidates[@]}"; do
-    echo "  - ${pair%%|*} / ${pair##*|}" >&2
-  done
-  echo "" >&2
-  echo "Tips:" >&2
-  echo "  - If you started netlify dev on a different port, set BASE_URL (e.g. BASE_URL=http://localhost:4095)." >&2
-  echo "  - If your fake provider uses different demo creds, set USERNAME and PASSWORD explicitly." >&2
-  echo "  - Or set AUTH_FAKE_USERNAME and AUTH_FAKE_PASSWORD and re-run." >&2
   exit 1
 fi
 
-provider="$(printf '%s' "$login_body" | node_json_get_first "provider" "data.provider")"
+provider="$(node_json_get_first "$login_body" "provider" "data.provider")"
+
 if [[ "$provider" != "fake" ]]; then
   echo "ERROR: expected provider 'fake' but got '${provider:-<empty>}'" >&2
   echo "$login_body" >&2
   exit 1
 fi
 
-access_token="$(printf '%s' "$login_body" | node_json_get_first "session.accessToken" "data.session.accessToken")"
-token_type="$(printf '%s' "$login_body" | node_json_get_first "session.tokenType" "data.session.tokenType")"
-user_id="$(printf '%s' "$login_body" | node_json_get_first "user.id" "data.user.id")"
+access_token="$(node_json_get_first "$login_body" "session.accessToken" "data.session.accessToken")"
+token_type="$(node_json_get_first "$login_body" "session.tokenType" "data.session.tokenType")"
+user_id="$(node_json_get_first "$login_body" "user.id" "data.user.id")"
 
 if [[ -z "$access_token" ]]; then
   echo "ERROR: missing session.accessToken" >&2
@@ -276,8 +272,8 @@ if [[ "$me_code" != "200" ]]; then
   exit 1
 fi
 
-me_provider="$(printf '%s' "$me_body" | node_json_get_first "provider" "data.provider")"
-me_user_id="$(printf '%s' "$me_body" | node_json_get_first "user.id" "data.user.id")"
+me_provider="$(node_json_get_first "$me_body" "provider" "data.provider")"
+me_user_id="$(node_json_get_first "$me_body" "user.id" "data.user.id")"
 
 if [[ "$me_provider" != "fake" ]]; then
   echo "ERROR: expected /me provider 'fake' but got '${me_provider:-<empty>}'" >&2
