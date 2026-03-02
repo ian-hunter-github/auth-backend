@@ -19,6 +19,11 @@ set -euo pipefail
 # credential pairs until one succeeds.
 #
 # If AUTH_FAKE_USERNAME/AUTH_FAKE_PASSWORD are set, they are tried first.
+#
+# Response envelope:
+# - Supports both shapes:
+#   { provider, session, user, ... }
+#   { ok, requestId, data: { provider, session, user, ... } }
 
 BASE_URL="${BASE_URL:-http://localhost:3999}"
 
@@ -133,6 +138,20 @@ node_json_get() {
   ' "$expr"
 }
 
+node_json_get_first() {
+  # Usage: echo "$json" | node_json_get_first "a.b" "c.d"
+  local p
+  for p in "$@"; do
+    val="$(node_json_get "$p")" || true
+    if [[ -n "${val:-}" ]]; then
+      printf '%s' "$val"
+      return 0
+    fi
+  done
+  printf '%s' ""
+  return 0
+}
+
 make_login_payload() {
   local u="$1"
   local p="$2"
@@ -156,7 +175,6 @@ else
     candidates+=("${AUTH_FAKE_USERNAME}|${AUTH_FAKE_PASSWORD}")
   fi
 
-  # Known fake provider demo creds (repo default is demo/letmein)
   candidates+=("demo|letmein")
   candidates+=("demo|password")
   candidates+=("demo@example.com|letmein")
@@ -215,16 +233,16 @@ if [[ "$login_code" != "200" ]]; then
   exit 1
 fi
 
-provider="$(printf '%s' "$login_body" | node_json_get "provider")"
+provider="$(printf '%s' "$login_body" | node_json_get_first "provider" "data.provider")"
 if [[ "$provider" != "fake" ]]; then
   echo "ERROR: expected provider 'fake' but got '${provider:-<empty>}'" >&2
   echo "$login_body" >&2
   exit 1
 fi
 
-access_token="$(printf '%s' "$login_body" | node_json_get "session.accessToken")"
-token_type="$(printf '%s' "$login_body" | node_json_get "session.tokenType")"
-user_id="$(printf '%s' "$login_body" | node_json_get "user.id")"
+access_token="$(printf '%s' "$login_body" | node_json_get_first "session.accessToken" "data.session.accessToken")"
+token_type="$(printf '%s' "$login_body" | node_json_get_first "session.tokenType" "data.session.tokenType")"
+user_id="$(printf '%s' "$login_body" | node_json_get_first "user.id" "data.user.id")"
 
 if [[ -z "$access_token" ]]; then
   echo "ERROR: missing session.accessToken" >&2
@@ -258,8 +276,8 @@ if [[ "$me_code" != "200" ]]; then
   exit 1
 fi
 
-me_provider="$(printf '%s' "$me_body" | node_json_get "provider")"
-me_user_id="$(printf '%s' "$me_body" | node_json_get "user.id")"
+me_provider="$(printf '%s' "$me_body" | node_json_get_first "provider" "data.provider")"
+me_user_id="$(printf '%s' "$me_body" | node_json_get_first "user.id" "data.user.id")"
 
 if [[ "$me_provider" != "fake" ]]; then
   echo "ERROR: expected /me provider 'fake' but got '${me_provider:-<empty>}'" >&2
