@@ -7,3 +7,4 @@ coverage/
 .DS_Store
 aichat_admin/
 .neon.env
+.env.local

@@ -1,24 +1,19 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { startNetlifyDev } from "./netlifyDevHarness.js";
+import { beforeAll, describe, expect, it } from "vitest";
 import type { SuccessEnvelope } from "../src/lib/response.js";
 import type { HealthResponse } from "../src/contracts/health.js";
 
-let harness: Awaited<ReturnType<typeof startNetlifyDev>> | undefined;
+let baseUrl = "";
 
-beforeAll(async () => {
-  process.env.AUTH_PROVIDER = "fake";
-  harness = await startNetlifyDev();
-});
-
-afterAll(async () => {
-  await harness?.stop();
+beforeAll(() => {
+  baseUrl = process.env.TEST_BASE_URL || "";
+  if (!baseUrl) {
+    throw new Error("Missing TEST_BASE_URL (global setup did not run?)");
+  }
 });
 
 describe("GET /.netlify/functions/health", () => {
   it("returns ok envelope", async () => {
-    if (!harness) throw new Error("Harness not started");
-
-    const res = await fetch(`${harness.baseUrl}/.netlify/functions/health`, {
+    const res = await fetch(`${baseUrl}/.netlify/functions/health`, {
       headers: { "x-request-id": "test-health-001" },
     });
 
@@ -31,3 +26,4 @@ describe("GET /.netlify/functions/health", () => {
     expect(body.data.status).toBe("ok");
   });
 });
+

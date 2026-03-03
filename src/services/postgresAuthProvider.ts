@@ -1,13 +1,14 @@
 import pg from "pg";
-import { createHash, timingSafeEqual } from "node:crypto";
+import crypto from "node:crypto";
 import { AppError } from "../lib/errors.js";
 import { getEnv, requireEnv } from "../lib/env.js";
+import { signAccessToken, verifyAccessToken } from "../lib/jwt.js";
 import type { AuthProvider } from "./authProvider.js";
 import type { AuthLoginRequest, AuthLoginResponse, AuthUserProfile } from "../contracts/auth.js";
 
 const { Pool } = pg;
 
-type DbUserAuthRow = {
+type DbUserRow = {
   id: string;
   email: string;
   display_name: string;
@@ -47,7 +48,7 @@ function getPool(): pg.Pool {
   return pool;
 }
 
-function toProfile(row: { id: string; email: string; display_name: string }): AuthUserProfile {
+function toProfile(row: DbUserProfileRow): AuthUserProfile {
   return {
     id: row.id,
     username: row.email,
@@ -57,27 +58,18 @@ function toProfile(row: { id: string; email: string; display_name: string }): Au
 }
 
 function sha256Hex(s: string): string {
-  return createHash("sha256").update(s, "utf8").digest("hex");
+  return crypto.createHash("sha256").update(s, "utf8").digest("hex");
 }
 
-function constantTimeEqHex(a: string, b: string): boolean {
-  if (!a || !b) return false;
-  if (a.length !== b.length) return false;
-  try {
-    const ab = Buffer.from(a, "hex");
-    const bb = Buffer.from(b, "hex");
-    if (ab.length !== bb.length) return false;
-    return timingSafeEqual(ab, bb);
-  } catch {
-    return false;
-  }
-}
-
+// Convenience alias to keep dev UX identical:
+// "demo" -> seeded email (demo@example.com).
 const DEMO_EMAIL = "demo@example.com";
-const TOKEN_PREFIX = "pg-access-token.";
 
 export const postgresAuthProvider: AuthProvider = {
   login: async (req: AuthLoginRequest): Promise<AuthLoginResponse> => {
+    // Ensure JWT is properly configured when using the Postgres provider.
+    requireEnv("AUTH_JWT_SECRET");
+
     const username = (req.username || "").trim();
     const password = req.password || "";
 
@@ -89,11 +81,10 @@ export const postgresAuthProvider: AuthProvider = {
       });
     }
 
-    // Convenience: allow "demo" as shorthand for the seeded email.
     const email = username === "demo" ? DEMO_EMAIL : username;
 
     const p = getPool();
-    const { rows } = await p.query<DbUserAuthRow>(
+    const { rows } = await p.query<DbUserRow>(
       "select id, email, display_name, password_salt, password_hash from identity.users where email = $1 limit 1",
       [email]
     );
@@ -103,39 +94,29 @@ export const postgresAuthProvider: AuthProvider = {
       throw new AppError("Invalid credentials", { code: "UNAUTHORIZED", status: 401 });
     }
 
-    const expected = row.password_hash;
-    const actual = sha256Hex(`${row.password_salt}${password}`);
-
-    if (!constantTimeEqHex(expected, actual)) {
+    const computed = sha256Hex(`${row.password_salt}${password}`);
+    if (computed !== row.password_hash) {
       throw new AppError("Invalid credentials", { code: "UNAUTHORIZED", status: 401 });
     }
 
-    const accessToken = `${TOKEN_PREFIX}${row.id}`;
+    const signed = signAccessToken(row.id);
 
     return {
       provider: "postgres",
       session: {
-        accessToken,
-        tokenType: "bearer"
+        accessToken: signed.token,
+        tokenType: "bearer",
+        expiresAt: signed.expiresAt
       },
       user: toProfile(row)
     };
   },
 
   getUserFromToken: async (token: string): Promise<AuthUserProfile> => {
-    const t = (token || "").trim();
-    if (!t) {
-      throw new AppError("Missing token", { code: "UNAUTHORIZED", status: 401 });
-    }
+    // Ensure JWT is properly configured when using the Postgres provider.
+    requireEnv("AUTH_JWT_SECRET");
 
-    if (!t.startsWith(TOKEN_PREFIX)) {
-      throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
-    }
-
-    const userId = t.slice(TOKEN_PREFIX.length).trim();
-    if (!userId) {
-      throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
-    }
+    const { userId } = verifyAccessToken(token);
 
     const p = getPool();
     const { rows } = await p.query<DbUserProfileRow>(

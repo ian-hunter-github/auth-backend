@@ -3,6 +3,7 @@ import net from "node:net";
 
 type Harness = {
   baseUrl: string;
+  pid: number;
   stop: () => Promise<void>;
 };
 
@@ -55,6 +56,9 @@ export async function startNetlifyDev(): Promise<Harness> {
 
   const staticPort = await pickPort(staticPreferred, { exclude: new Set([proxyPort]) });
 
+  // IMPORTANT:
+  // - Use detached process group so globalTeardown can kill the whole tree via -pid.
+  // - Use stdio: "ignore" so Vitest doesn't keep PIPEWRAP/PROCESSWRAP handles alive.
   const child = spawn(
     process.platform === "win32" ? "npx.cmd" : "npx",
     [
@@ -68,7 +72,8 @@ export async function startNetlifyDev(): Promise<Harness> {
       String(staticPort)
     ],
     {
-      stdio: "pipe",
+      stdio: "ignore",
+      detached: true,
       env: {
         ...process.env,
         NETLIFY_DEV: "true",
@@ -77,43 +82,64 @@ export async function startNetlifyDev(): Promise<Harness> {
     }
   );
 
-  let output = "";
-  child.stdout.on("data", (d) => {
-    output += d.toString();
-  });
-  child.stderr.on("data", (d) => {
-    output += d.toString();
-  });
+  // Allow the parent (vitest) process to exit even if netlify is still running.
+  child.unref();
+
+  const pid = child.pid;
+  if (!pid) {
+    throw new Error("Failed to start netlify dev: missing child pid");
+  }
 
   const baseUrl = `http://127.0.0.1:${proxyPort}`;
 
   try {
     await waitForHealthy(baseUrl, 90000);
   } catch (err) {
+    const original = err instanceof Error ? err.message : String(err);
+
+    // Best-effort kill of the process group.
     try {
-      child.kill("SIGTERM");
+      process.kill(-pid, "SIGTERM");
     } catch {
-      // ignore: child may already be exiting
+      try {
+        process.kill(pid, "SIGTERM");
+      } catch {
+        // ignore
+      }
     }
 
-    const original = err instanceof Error ? err.message : String(err);
     throw new Error(
-      `Failed to start netlify dev.\n\nBase URL: ${baseUrl}\nProxy port: ${proxyPort}\nStatic port: ${staticPort}\n\nOriginal error: ${original}\n\nnetlify dev output:\n${output}\n`
+      `Failed to start netlify dev.\n\nBase URL: ${baseUrl}\nProxy port: ${proxyPort}\nStatic port: ${staticPort}\n\nOriginal error: ${original}\n`
     );
   }
 
   return {
     baseUrl,
+    pid,
     stop: async () => {
-      if (child.killed) return;
-      await new Promise<void>((resolve) => {
-        child.once("exit", () => resolve());
-        child.kill("SIGTERM");
-        setTimeout(() => {
-          if (!child.killed) child.kill("SIGKILL");
-          resolve();
-        }, 5000);
-      });
+      // Best-effort group shutdown (works on Unix when detached:true).
+      try {
+        process.kill(-pid, "SIGTERM");
+      } catch {
+        try {
+          process.kill(pid, "SIGTERM");
+        } catch {
+          // ignore
+        }
+      }
+
+      await sleep(1500);
+
+      try {
+        process.kill(-pid, "SIGKILL");
+      } catch {
+        try {
+          process.kill(pid, "SIGKILL");
+        } catch {
+          // ignore
+        }
+      }
     }
   };
 }
+

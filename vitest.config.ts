@@ -13,8 +13,11 @@ export default defineConfig({
         singleThread: true
       }
     },
-    // Keep current defaults (explicitly), but give hooks room on slower machines.
+    globalSetup: ["./test/globalSetup.ts"],
+    globalTeardown: ["./test/globalTeardown.ts"],
+    // Give hooks room on slower machines.
     hookTimeout: 120_000,
     testTimeout: 120_000
   }
 });
+

@@ -1,24 +1,19 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { startNetlifyDev } from "./netlifyDevHarness.js";
+import { beforeAll, describe, expect, it } from "vitest";
 import type { SuccessEnvelope, ErrorEnvelope } from "../src/lib/response.js";
 import type { AuthLoginResponse } from "../src/contracts/auth.js";
 
-let harness: Awaited<ReturnType<typeof startNetlifyDev>> | undefined;
+let baseUrl = "";
 
-beforeAll(async () => {
-  process.env.AUTH_PROVIDER = "fake";
-  harness = await startNetlifyDev();
-});
-
-afterAll(async () => {
-  await harness?.stop();
+beforeAll(() => {
+  baseUrl = process.env.TEST_BASE_URL || "";
+  if (!baseUrl) {
+    throw new Error("Missing TEST_BASE_URL (global setup did not run?)");
+  }
 });
 
 describe("POST /.netlify/functions/auth-login", () => {
   it("rejects invalid credentials", async () => {
-    if (!harness) throw new Error("Harness not started");
-
-    const res = await fetch(`${harness.baseUrl}/.netlify/functions/auth-login`, {
+    const res = await fetch(`${baseUrl}/.netlify/functions/auth-login`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -34,9 +29,7 @@ describe("POST /.netlify/functions/auth-login", () => {
   });
 
   it("accepts demo/letmein", async () => {
-    if (!harness) throw new Error("Harness not started");
-
-    const res = await fetch(`${harness.baseUrl}/.netlify/functions/auth-login`, {
+    const res = await fetch(`${baseUrl}/.netlify/functions/auth-login`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -55,3 +48,4 @@ describe("POST /.netlify/functions/auth-login", () => {
     expect(body.data.session.tokenType).toBe("bearer");
   });
 });
+

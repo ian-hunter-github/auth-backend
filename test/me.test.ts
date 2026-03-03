@@ -1,24 +1,19 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { startNetlifyDev } from "./netlifyDevHarness.js";
+import { beforeAll, describe, expect, it } from "vitest";
 import type { SuccessEnvelope, ErrorEnvelope } from "../src/lib/response.js";
 import type { MeResponse } from "../src/contracts/me.js";
 
-let harness: Awaited<ReturnType<typeof startNetlifyDev>> | undefined;
+let baseUrl = "";
 
-beforeAll(async () => {
-  process.env.AUTH_PROVIDER = "fake";
-  harness = await startNetlifyDev();
-});
-
-afterAll(async () => {
-  await harness?.stop();
+beforeAll(() => {
+  baseUrl = process.env.TEST_BASE_URL || "";
+  if (!baseUrl) {
+    throw new Error("Missing TEST_BASE_URL (global setup did not run?)");
+  }
 });
 
 describe("GET /.netlify/functions/me", () => {
   it("rejects missing auth header", async () => {
-    if (!harness) throw new Error("Harness not started");
-
-    const res = await fetch(`${harness.baseUrl}/.netlify/functions/me`, {
+    const res = await fetch(`${baseUrl}/.netlify/functions/me`, {
       headers: { "x-request-id": "test-me-401a" },
     });
 
@@ -29,9 +24,7 @@ describe("GET /.netlify/functions/me", () => {
   });
 
   it("returns profile for valid token", async () => {
-    if (!harness) throw new Error("Harness not started");
-
-    const res = await fetch(`${harness.baseUrl}/.netlify/functions/me`, {
+    const res = await fetch(`${baseUrl}/.netlify/functions/me`, {
       headers: {
         authorization: "Bearer fake-access-token.demo",
         "x-request-id": "test-me-200",
@@ -45,9 +38,7 @@ describe("GET /.netlify/functions/me", () => {
   });
 
   it("accepts lowercase bearer scheme", async () => {
-    if (!harness) throw new Error("Harness not started");
-
-    const res = await fetch(`${harness.baseUrl}/.netlify/functions/me`, {
+    const res = await fetch(`${baseUrl}/.netlify/functions/me`, {
       headers: {
         authorization: "bearer fake-access-token.demo",
         "x-request-id": "test-me-200b",
@@ -60,3 +51,4 @@ describe("GET /.netlify/functions/me", () => {
     expect(body.data.user.username).toBe("demo");
   });
 });
+
