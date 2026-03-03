@@ -7,8 +7,6 @@ let harness: Awaited<ReturnType<typeof startNetlifyDev>> | undefined;
 
 beforeAll(async () => {
   process.env.AUTH_PROVIDER = "fake";
-  process.env.SUPABASE_URL = process.env.SUPABASE_URL || "http://127.0.0.1:54321";
-  process.env.SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || "test_anon_key";
   harness = await startNetlifyDev();
 });
 
@@ -24,9 +22,9 @@ describe("POST /.netlify/functions/auth-login", () => {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "x-request-id": "test-auth-401"
+        "x-request-id": "test-auth-401",
       },
-      body: JSON.stringify({ username: "demo", password: "bad" })
+      body: JSON.stringify({ username: "demo", password: "bad" }),
     });
 
     expect(res.status).toBe(401);
@@ -42,9 +40,9 @@ describe("POST /.netlify/functions/auth-login", () => {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "x-request-id": "test-auth-200"
+        "x-request-id": "test-auth-200",
       },
-      body: JSON.stringify({ username: "demo", password: "letmein" })
+      body: JSON.stringify({ username: "demo", password: "letmein" }),
     });
 
     expect(res.status).toBe(200);

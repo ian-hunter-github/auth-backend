@@ -17,7 +17,7 @@ export type AuthSession = {
   refreshToken?: string;
 };
 
-export type AuthProviderId = "fake" | "supabase" | "google" | "github";
+export type AuthProviderId = "fake" | "postgres" | "google" | "github";
 
 export type AuthLoginResponse = {
   provider: AuthProviderId;

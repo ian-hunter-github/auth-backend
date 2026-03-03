@@ -228,8 +228,8 @@ fi
 
 provider="$(node_json_get_first "$login_body" "provider" "data.provider")"
 
-if [[ "$provider" != "fake" ]]; then
-  echo "ERROR: expected provider 'fake' but got '${provider:-<empty>}'" >&2
+if [[ "$provider" != "fake" && "$provider" != "postgres" ]]; then
+  echo "ERROR: expected provider 'fake' or 'postgres' but got '${provider:-<empty>}'" >&2
   echo "$login_body" >&2
   exit 1
 fi

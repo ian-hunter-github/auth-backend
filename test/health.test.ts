@@ -7,8 +7,6 @@ let harness: Awaited<ReturnType<typeof startNetlifyDev>> | undefined;
 
 beforeAll(async () => {
   process.env.AUTH_PROVIDER = "fake";
-  process.env.SUPABASE_URL = process.env.SUPABASE_URL || "http://127.0.0.1:54321";
-  process.env.SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || "test_anon_key";
   harness = await startNetlifyDev();
 });
 
@@ -21,7 +19,7 @@ describe("GET /.netlify/functions/health", () => {
     if (!harness) throw new Error("Harness not started");
 
     const res = await fetch(`${harness.baseUrl}/.netlify/functions/health`, {
-      headers: { "x-request-id": "test-health-001" }
+      headers: { "x-request-id": "test-health-001" },
     });
 
     expect(res.status).toBe(200);

@@ -7,8 +7,6 @@ let harness: Awaited<ReturnType<typeof startNetlifyDev>> | undefined;
 
 beforeAll(async () => {
   process.env.AUTH_PROVIDER = "fake";
-  process.env.SUPABASE_URL = process.env.SUPABASE_URL || "http://127.0.0.1:54321";
-  process.env.SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || "test_anon_key";
   harness = await startNetlifyDev();
 });
 
@@ -21,7 +19,7 @@ describe("GET /.netlify/functions/me", () => {
     if (!harness) throw new Error("Harness not started");
 
     const res = await fetch(`${harness.baseUrl}/.netlify/functions/me`, {
-      headers: { "x-request-id": "test-me-401a" }
+      headers: { "x-request-id": "test-me-401a" },
     });
 
     expect(res.status).toBe(401);
@@ -36,8 +34,8 @@ describe("GET /.netlify/functions/me", () => {
     const res = await fetch(`${harness.baseUrl}/.netlify/functions/me`, {
       headers: {
         authorization: "Bearer fake-access-token.demo",
-        "x-request-id": "test-me-200"
-      }
+        "x-request-id": "test-me-200",
+      },
     });
 
     expect(res.status).toBe(200);
@@ -52,8 +50,8 @@ describe("GET /.netlify/functions/me", () => {
     const res = await fetch(`${harness.baseUrl}/.netlify/functions/me`, {
       headers: {
         authorization: "bearer fake-access-token.demo",
-        "x-request-id": "test-me-200b"
-      }
+        "x-request-id": "test-me-200b",
+      },
     });
 
     expect(res.status).toBe(200);

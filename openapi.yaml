@@ -55,7 +55,6 @@ components:
       examples:
         - fake
         - postgres
-        - supabase
     Session:
       type: object
       additionalProperties: false
@@ -105,11 +104,11 @@ components:
         - user
       properties:
         provider:
-          $ref: '#/components/schemas/AuthProvider'
+          $ref: "#/components/schemas/AuthProvider"
         session:
-          $ref: '#/components/schemas/Session'
+          $ref: "#/components/schemas/Session"
         user:
-          $ref: '#/components/schemas/User'
+          $ref: "#/components/schemas/User"
     AuthLoginRequest:
       type: object
       additionalProperties: false
@@ -160,9 +159,9 @@ components:
         - user
       properties:
         provider:
-          $ref: '#/components/schemas/AuthProvider'
+          $ref: "#/components/schemas/AuthProvider"
         user:
-          $ref: '#/components/schemas/User'
+          $ref: "#/components/schemas/User"
 
 paths:
   /auth-login:
@@ -175,7 +174,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/AuthLoginRequest'
+              $ref: "#/components/schemas/AuthLoginRequest"
             examples:
               demo:
                 value:
@@ -187,25 +186,25 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AuthResult'
+                $ref: "#/components/schemas/AuthResult"
         "400":
           description: Validation error.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
         "401":
           description: Invalid credentials.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: Internal error.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
 
   /me:
     get:
@@ -220,19 +219,19 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MeResponse'
+                $ref: "#/components/schemas/MeResponse"
         "401":
           description: Missing or invalid access token.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: Internal error.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
 
   /auth-register:
     post:
@@ -246,32 +245,32 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/AuthRegisterRequest'
+              $ref: "#/components/schemas/AuthRegisterRequest"
       responses:
         "201":
           description: User created and session issued.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AuthResult'
+                $ref: "#/components/schemas/AuthResult"
         "400":
           description: Validation error.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: Email already exists.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: Internal error.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
 
   /auth-refresh:
     post:
@@ -285,32 +284,32 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/AuthRefreshRequest'
+              $ref: "#/components/schemas/AuthRefreshRequest"
       responses:
         "200":
           description: New session issued.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AuthResult'
+                $ref: "#/components/schemas/AuthResult"
         "400":
           description: Validation error.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
         "401":
           description: Invalid or expired refresh token.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: Internal error.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
 
   /auth-logout:
     post:
@@ -326,7 +325,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/AuthLogoutRequest'
+              $ref: "#/components/schemas/AuthLogoutRequest"
       responses:
         "204":
           description: Logged out.
@@ -335,16 +334,16 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
         "401":
           description: Missing or invalid access token.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: Internal error.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"

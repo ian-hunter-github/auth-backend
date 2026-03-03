@@ -12,7 +12,7 @@ set -euo pipefail
 # Usage examples:
 #   PGSYSTEM=neon scripts/pg_psql.sh
 #   scripts/pg_psql.sh -c "select 1;"
-#   PGSYSTEM=supabase scripts/pg_psql.sh -f db/identity_backend/0001_init.sql
+#   PGSYSTEM=neon scripts/pg_psql.sh -f db/identity_backend/0001_init.sql
 
 PGSYSTEM="${PGSYSTEM:-neon}"
 ENV_FILE="postgres/env/${PGSYSTEM}/.env"
