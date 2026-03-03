@@ -1,9 +1,53 @@
+import fs from "node:fs";
+import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startNetlifyDev } from "./netlifyDevHarness.js";
 import type { SuccessEnvelope, ErrorEnvelope } from "../src/lib/response.js";
 import type { AuthLoginResponse, AuthRefreshResponse } from "../src/contracts/auth.js";
 
 const SHOULD_RUN = process.env.RUN_PG_TESTS === "1";
+
+function loadDotEnvFile(filePath: string) {
+  if (!fs.existsSync(filePath)) return;
+
+  const raw = fs.readFileSync(filePath, "utf8");
+  for (const line0 of raw.split(/\r?\n/)) {
+    const line = line0.trim();
+    if (!line) continue;
+    if (line.startsWith("#")) continue;
+
+    const l = line.startsWith("export ") ? line.slice("export ".length).trim() : line;
+    const eq = l.indexOf("=");
+    if (eq <= 0) continue;
+
+    const key = l.slice(0, eq).trim();
+    let val = l.slice(eq + 1).trim();
+
+    if (!key) continue;
+
+    // Strip surrounding quotes if present
+    if (
+      (val.startsWith("\"") && val.endsWith("\"") && val.length >= 2) ||
+      (val.startsWith("'") && val.endsWith("'") && val.length >= 2)
+    ) {
+      val = val.slice(1, -1);
+    }
+
+    // Don't override values that are already set (CI or caller-provided env wins)
+    if (process.env[key] === undefined || process.env[key] === "") {
+      process.env[key] = val;
+    }
+  }
+}
+
+function loadPgEnvFromRepo() {
+  const pgSystem = process.env.PGSYSTEM || "neon";
+  const pgEnvPath = path.resolve(process.cwd(), `postgres/env/${pgSystem}/.env`);
+  const localEnvPath = path.resolve(process.cwd(), ".env.local");
+
+  loadDotEnvFile(pgEnvPath);
+  loadDotEnvFile(localEnvPath);
+}
 
 function requireEnv(name: string): string {
   const v = process.env[name];
@@ -24,6 +68,8 @@ const suite = SHOULD_RUN ? describe : describe.skip;
 
 suite("postgres refresh flow (RUN_PG_TESTS=1)", () => {
   beforeAll(async () => {
+    loadPgEnvFromRepo();
+
     requireEnv("PGHOST");
     requireEnv("PGDATABASE");
     requireEnv("PGUSER");
