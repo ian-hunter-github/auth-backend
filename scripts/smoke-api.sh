@@ -24,6 +24,8 @@ fi
 # - Supports both shapes:
 #   { provider, session, user, ... }
 #   { ok, requestId, data: { provider, session, user, ... } }
+#   Error:
+#   { ok:false, requestId, error:{ code, message, ... } }
 
 BASE_URL="${BASE_URL:-http://localhost:3999}"
 
@@ -108,9 +110,11 @@ request_json() {
     printf '%s' "$out_code"
   }
 
+  # 1) Try function URL first
   code="$(do_curl "$url_fn")"
   used_url="$url_fn"
 
+  # Retry on routing/method issues
   if [[ "$code" == "404" || "$code" == "000" || "$code" == "405" ]]; then
     code="$(do_curl "$url_pretty")"
     used_url="$url_pretty"
@@ -171,58 +175,88 @@ make_login_payload() {
   node -e 'process.stdout.write(JSON.stringify({ username: process.argv[1], password: process.argv[2] }))' "$u" "$p"
 }
 
-echo "Smoke test (fake): BASE_URL=$BASE_URL"
+expect_http_code() {
+  local got="$1"
+  local want="$2"
+  local label="$3"
+  if [[ "$got" != "$want" ]]; then
+    echo "ERROR: ${label}: expected HTTP ${want} but got ${got}" >&2
+    return 1
+  fi
+  return 0
+}
 
-candidates=()
+expect_ok_false_unauthorized() {
+  local body="$1"
+  local label="$2"
 
+  local okv codev
+  okv="$(node_json_get_first "$body" "ok")"
+  codev="$(node_json_get_first "$body" "error.code" "data.error.code")"
+
+  if [[ "$okv" != "false" ]]; then
+    echo "ERROR: ${label}: expected ok=false but got '${okv:-<empty>}'" >&2
+    echo "$body" >&2
+    return 1
+  fi
+
+  if [[ "$codev" != "UNAUTHORIZED" ]]; then
+    echo "ERROR: ${label}: expected error.code=UNAUTHORIZED but got '${codev:-<empty>}'" >&2
+    echo "$body" >&2
+    return 1
+  fi
+
+  return 0
+}
+
+echo "Smoke test: BASE_URL=$BASE_URL"
+
+# Select credentials for the positive login.
 if [[ -n "${SMOKE_USERNAME:-}" || -n "${SMOKE_PASSWORD:-}" ]]; then
   if [[ -z "${SMOKE_USERNAME:-}" || -z "${SMOKE_PASSWORD:-}" ]]; then
     echo "ERROR: if you set SMOKE_USERNAME or SMOKE_PASSWORD, you must set both." >&2
     exit 2
   fi
-  candidates+=("${SMOKE_USERNAME}|${SMOKE_PASSWORD}")
+  GOOD_USERNAME="$SMOKE_USERNAME"
+  GOOD_PASSWORD="$SMOKE_PASSWORD"
 else
-  candidates+=("demo|letmein")
+  GOOD_USERNAME="demo"
+  GOOD_PASSWORD="letmein"
 fi
 
-login_code=""
-login_body=""
-login_url=""
-used_username=""
+# A deterministic "wrong password" for negative check.
+BAD_PASSWORD="wrong-password"
+
+echo "0) Negative: POST /auth-login rejects wrong password"
+bad_payload="$(make_login_payload "$GOOD_USERNAME" "$BAD_PASSWORD")"
+bad_resp="$(request_json "POST" "/auth-login" "/.netlify/functions/auth-login" "$bad_payload")"
+bad_url="$(printf '%s' "$bad_resp" | sed -n '1p')"
+bad_code="$(printf '%s' "$bad_resp" | sed -n '2p')"
+bad_body="$(printf '%s' "$bad_resp" | sed -n '3,$p')"
+
+# Expect 401 UNAUTHORIZED envelope.
+if ! expect_http_code "$bad_code" "401" "bad login"; then
+  echo "Request: ${bad_url}" >&2
+  echo "$bad_body" >&2
+  exit 1
+fi
+if ! expect_ok_false_unauthorized "$bad_body" "bad login"; then
+  echo "Request: ${bad_url}" >&2
+  exit 1
+fi
+echo "OK: bad login rejected"
 
 echo "1) POST /auth-login"
+payload="$(make_login_payload "$GOOD_USERNAME" "$GOOD_PASSWORD")"
 
-last_code=""
-last_url=""
-last_body=""
-
-for pair in "${candidates[@]}"; do
-  u="${pair%%|*}"
-  p="${pair##*|}"
-
-  payload="$(make_login_payload "$u" "$p")"
-
-  resp="$(request_json "POST" "/auth-login" "/.netlify/functions/auth-login" "$payload")"
-  url="$(printf '%s' "$resp" | sed -n '1p')"
-  code="$(printf '%s' "$resp" | sed -n '2p')"
-  body="$(printf '%s' "$resp" | sed -n '3,$p')"
-
-  last_code="$code"
-  last_url="$url"
-  last_body="$body"
-
-  if [[ "$code" == "200" ]]; then
-    login_code="$code"
-    login_url="$url"
-    login_body="$body"
-    used_username="$u"
-    break
-  fi
-done
+resp="$(request_json "POST" "/auth-login" "/.netlify/functions/auth-login" "$payload")"
+login_url="$(printf '%s' "$resp" | sed -n '1p')"
+login_code="$(printf '%s' "$resp" | sed -n '2p')"
+login_body="$(printf '%s' "$resp" | sed -n '3,$p')"
 
 if [[ "$login_code" != "200" ]]; then
-  echo "ERROR: login failed (last attempt: ${last_code:-<none>}) at ${last_url:-<none>}" >&2
-  echo "${last_body:-<no body>}" >&2
+  echo "ERROR: login failed (${login_code}) at ${login_url}" >&2
+  echo "$login_body" >&2
   exit 1
 fi
 
@@ -249,11 +283,46 @@ if [[ -z "$user_id" ]]; then
   exit 1
 fi
 
-echo "OK: login succeeded as '${used_username}' via ${login_url}"
+echo "OK: login succeeded as '${GOOD_USERNAME}' via ${login_url}"
 
 auth_header="Bearer ${access_token}"
 
-echo "2) GET /me"
+echo "2) Negative: GET /me rejects missing Authorization header"
+me_noauth_resp="$(request_json "GET" "/me" "/.netlify/functions/me" "" "")"
+me_noauth_url="$(printf '%s' "$me_noauth_resp" | sed -n '1p')"
+me_noauth_code="$(printf '%s' "$me_noauth_resp" | sed -n '2p')"
+me_noauth_body="$(printf '%s' "$me_noauth_resp" | sed -n '3,$p')"
+
+if ! expect_http_code "$me_noauth_code" "401" "me missing auth"; then
+  echo "Request: ${me_noauth_url}" >&2
+  echo "$me_noauth_body" >&2
+  exit 1
+fi
+if ! expect_ok_false_unauthorized "$me_noauth_body" "me missing auth"; then
+  echo "Request: ${me_noauth_url}" >&2
+  exit 1
+fi
+echo "OK: /me missing auth rejected"
+
+echo "3) Negative: GET /me rejects invalid token"
+# Use a token that should be invalid for both providers.
+me_badtoken_resp="$(request_json "GET" "/me" "/.netlify/functions/me" "" "Bearer bogus-token")"
+me_badtoken_url="$(printf '%s' "$me_badtoken_resp" | sed -n '1p')"
+me_badtoken_code="$(printf '%s' "$me_badtoken_resp" | sed -n '2p')"
+me_badtoken_body="$(printf '%s' "$me_badtoken_resp" | sed -n '3,$p')"
+
+if ! expect_http_code "$me_badtoken_code" "401" "me invalid token"; then
+  echo "Request: ${me_badtoken_url}" >&2
+  echo "$me_badtoken_body" >&2
+  exit 1
+fi
+if ! expect_ok_false_unauthorized "$me_badtoken_body" "me invalid token"; then
+  echo "Request: ${me_badtoken_url}" >&2
+  exit 1
+fi
+echo "OK: /me invalid token rejected"
+
+echo "4) GET /me"
 me_resp="$(request_json "GET" "/me" "/.netlify/functions/me" "" "$auth_header")"
 me_url="$(printf '%s' "$me_resp" | sed -n '1p')"
 me_code="$(printf '%s' "$me_resp" | sed -n '2p')"
@@ -266,7 +335,7 @@ if [[ "$me_code" != "200" ]]; then
 fi
 
 # /me may (currently) not include provider in its response body.
-# If it does, it must be 'fake' for this smoke scenario.
+# If it does, it must match the login provider.
 me_provider="$(node_json_get_first "$me_body" "provider" "data.provider")"
 if [[ -n "${me_provider:-}" && "$me_provider" != "$provider" ]]; then
   echo "ERROR: expected /me provider '$provider' but got '${me_provider:-<empty>}'" >&2
@@ -282,3 +351,4 @@ if [[ -z "$me_user_id" ]]; then
 fi
 
 echo "OK: smoke test passed ($provider)"
+
