@@ -1,27 +1,23 @@
-import { writeFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { startNetlifyDev } from "./netlifyDevHarness.js";
 
-const STATE_PATH = resolve(process.cwd(), ".vitest-netlify-dev.json");
+type Harness = Awaited<ReturnType<typeof startNetlifyDev>>;
+
+declare global {
+  // eslint-disable-next-line no-var
+  var __NETLIFY_DEV_HARNESS__: Harness | undefined;
+}
 
 export default async function globalSetup() {
-  process.env.AUTH_PROVIDER = process.env.AUTH_PROVIDER || "fake";
+  // Ensure unit tests that sign/verify JWTs have a secret in CI/local.
+  if (!process.env.AUTH_JWT_SECRET) {
+    process.env.AUTH_JWT_SECRET = "test-auth-jwt-secret-0123456789abcdef0123456789abcdef";
+  }
 
-  const harness = await startNetlifyDev();
+  // Default to fake for CI-safe determinism unless a test explicitly overrides.
+  if (!process.env.AUTH_PROVIDER) {
+    process.env.AUTH_PROVIDER = "fake";
+  }
 
-  process.env.TEST_BASE_URL = harness.baseUrl;
-
-  writeFileSync(
-    STATE_PATH,
-    JSON.stringify(
-      {
-        baseUrl: harness.baseUrl,
-        pid: harness.pid
-      },
-      null,
-      2
-    ),
-    "utf8"
-  );
+  globalThis.__NETLIFY_DEV_HARNESS__ = await startNetlifyDev();
 }
 
