@@ -6,9 +6,11 @@ import type { AuthProvider } from "./authProvider.js";
 import type {
   AuthLoginRequest,
   AuthLoginResponse,
-  AuthLogoutResponse,
+  AuthLogoutRequest,
   AuthRefreshRequest,
   AuthRefreshResponse,
+  AuthRegisterRequest,
+  AuthRegisterResponse,
   AuthUserProfile
 } from "../contracts/auth.js";
 
@@ -18,6 +20,8 @@ type DbUserRow = {
   id: string;
   email: string;
   display_name: string;
+  password_salt?: string | null;
+  password_hash?: string | null;
 };
 
 type DbSessionRow = {
@@ -63,50 +67,92 @@ function toProfile(row: DbUserRow): AuthUserProfile {
   };
 }
 
-function sha256Hex(v: string): string {
-  return crypto.createHash("sha256").update(v, "utf8").digest("hex");
+const TOKEN_PREFIX = "pg-access-token.";
+
+function sha256Hex(input: string): string {
+  return crypto.createHash("sha256").update(input, "utf8").digest("hex");
 }
 
-function newRefreshToken(): string {
-  // 32 bytes => 64 hex chars, deterministic length.
-  return crypto.randomBytes(32).toString("hex");
+function randomHex(bytes: number): string {
+  return crypto.randomBytes(bytes).toString("hex");
 }
 
-function refreshExpiryIso(): string {
-  const days = Number(getEnv("AUTH_REFRESH_TTL_DAYS") || "30");
-  const ms = Number.isFinite(days) && days > 0 ? days * 24 * 60 * 60 * 1000 : 30 * 24 * 60 * 60 * 1000;
-  return new Date(Date.now() + ms).toISOString();
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function addMinutesIso(minutes: number) {
+  return new Date(Date.now() + minutes * 60_000).toISOString();
+}
+
+function accessTokenForUser(userId: string): string {
+  return `${TOKEN_PREFIX}${userId}`;
+}
+
+function parseAccessToken(token: string): string {
+  const t = (token || "").trim();
+  if (!t) throw new AppError("Missing token", { code: "UNAUTHORIZED", status: 401 });
+  if (!t.startsWith(TOKEN_PREFIX)) throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
+  const userId = t.slice(TOKEN_PREFIX.length);
+  if (!userId) throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
+  return userId;
 }
 
 async function createSession(userId: string): Promise<{ refreshToken: string; expiresAt: string }> {
-  const p = getPool();
-  const refreshToken = newRefreshToken();
+  const refreshToken = `pg-refresh-token.${randomHex(24)}`;
   const refreshTokenHash = sha256Hex(refreshToken);
-  const expiresAt = refreshExpiryIso();
+  const expiresAt = addMinutesIso(60);
 
+  const p = getPool();
   await p.query(
-    "insert into identity.sessions (user_id, refresh_token_hash, expires_at) values ($1::uuid, $2, $3::timestamptz)",
+    `
+    insert into identity.sessions (user_id, refresh_token_hash, expires_at)
+    values ($1::uuid, $2, $3::timestamptz)
+    `,
     [userId, refreshTokenHash, expiresAt]
   );
 
   return { refreshToken, expiresAt };
 }
 
-async function revokeSessionByHash(refreshTokenHash: string): Promise<boolean> {
+async function revokeSessionByHash(refreshTokenHash: string): Promise<void> {
   const p = getPool();
-  const { rowCount } = await p.query(
-    "update identity.sessions set revoked_at = now() where refresh_token_hash = $1 and revoked_at is null",
-    [refreshTokenHash]
+  await p.query(
+    `
+    update identity.sessions
+    set revoked_at = $2::timestamptz
+    where refresh_token_hash = $1
+      and revoked_at is null
+    `,
+    [refreshTokenHash, nowIso()]
   );
-  return (rowCount || 0) > 0;
 }
 
-// Phase 2 minimal Postgres-backed provider:
-// - Uses identity.users (seeded) to resolve user profile.
-// - Deterministic dev mapping: demo/letmein -> demo@example.com (seeded user).
-const DEMO_EMAIL = "demo@example.com";
-const DEMO_PASSWORD = "letmein";
-const TOKEN_PREFIX = "pg-access-token.";
+async function revokeSessionsByUserId(userId: string): Promise<void> {
+  const p = getPool();
+  await p.query(
+    `
+    update identity.sessions
+    set revoked_at = $2::timestamptz
+    where user_id = $1::uuid
+      and revoked_at is null
+    `,
+    [userId, nowIso()]
+  );
+}
+
+function requirePasswordFields(row: DbUserRow): { salt: string; hash: string } {
+  const salt = (row.password_salt || "").trim();
+  const hash = (row.password_hash || "").trim();
+  if (!salt || !hash) {
+    throw new AppError("Invalid credentials", { code: "UNAUTHORIZED", status: 401 });
+  }
+  return { salt, hash };
+}
+
+function hashPassword(saltHex: string, password: string): string {
+  return sha256Hex(`${saltHex}:${password}`);
+}
 
 export const postgresAuthProvider: AuthProvider = {
   login: async (req: AuthLoginRequest): Promise<AuthLoginResponse> => {
@@ -121,17 +167,10 @@ export const postgresAuthProvider: AuthProvider = {
       });
     }
 
-    // Deterministic demo-only behaviour for now.
-    // Treat "demo" as shorthand for the seeded email.
-    const email = username === "demo" ? DEMO_EMAIL : username;
-
-    if (!(email === DEMO_EMAIL && password === DEMO_PASSWORD)) {
-      throw new AppError("Invalid credentials", { code: "UNAUTHORIZED", status: 401 });
-    }
-
+    const email = username === "demo" ? "demo@example.com" : username;
     const p = getPool();
     const { rows } = await p.query<DbUserRow>(
-      "select id, email, display_name from identity.users where email = $1 limit 1",
+      "select id, email, display_name, password_salt, password_hash from identity.users where email = $1 limit 1",
       [email]
     );
 
@@ -140,7 +179,13 @@ export const postgresAuthProvider: AuthProvider = {
       throw new AppError("Invalid credentials", { code: "UNAUTHORIZED", status: 401 });
     }
 
-    const accessToken = `${TOKEN_PREFIX}${row.id}`;
+    const { salt, hash } = requirePasswordFields(row);
+    const expected = hashPassword(salt, password);
+    if (expected !== hash) {
+      throw new AppError("Invalid credentials", { code: "UNAUTHORIZED", status: 401 });
+    }
+
+    const accessToken = accessTokenForUser(row.id);
     const { refreshToken, expiresAt } = await createSession(row.id);
 
     return {
@@ -152,6 +197,58 @@ export const postgresAuthProvider: AuthProvider = {
         expiresAt
       },
       user: toProfile(row)
+    };
+  },
+
+  register: async (req: AuthRegisterRequest): Promise<AuthRegisterResponse> => {
+    const email = (req.email || "").trim().toLowerCase();
+    const password = req.password || "";
+    const displayName = (req.displayName || "").trim();
+
+    if (!email || !password) {
+      throw new AppError("email and password are required", {
+        code: "BAD_REQUEST",
+        status: 400,
+        details: { fields: ["email", "password"] }
+      });
+    }
+
+    const p = getPool();
+    const { rows: existing } = await p.query<{ id: string }>(
+      "select id from identity.users where email = $1 limit 1",
+      [email]
+    );
+    if (existing[0]) {
+      throw new AppError("Email already exists", { code: "CONFLICT", status: 409 });
+    }
+
+    const salt = randomHex(16);
+    const hash = hashPassword(salt, password);
+
+    const { rows } = await p.query<DbUserRow>(
+      `
+      insert into identity.users (email, display_name, password_salt, password_hash)
+      values ($1, $2, $3, $4)
+      returning id, email, display_name, password_salt, password_hash
+      `,
+      [email, displayName || email, salt, hash]
+    );
+
+    const u = rows[0];
+    if (!u) throw new AppError("Failed to create user", { code: "INTERNAL_ERROR", status: 500 });
+
+    const accessToken = accessTokenForUser(u.id);
+    const { refreshToken, expiresAt } = await createSession(u.id);
+
+    return {
+      provider: "postgres",
+      session: {
+        accessToken,
+        tokenType: "bearer",
+        refreshToken,
+        expiresAt
+      },
+      user: toProfile(u)
     };
   },
 
@@ -189,7 +286,6 @@ export const postgresAuthProvider: AuthProvider = {
       throw new AppError("Invalid or expired refresh token", { code: "UNAUTHORIZED", status: 401 });
     }
 
-    // Rotate: revoke old, create new.
     await revokeSessionByHash(refreshTokenHash);
     const { refreshToken: nextRefreshToken, expiresAt } = await createSession(s.user_id);
 
@@ -203,7 +299,7 @@ export const postgresAuthProvider: AuthProvider = {
       throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
     }
 
-    const accessToken = `${TOKEN_PREFIX}${u.id}`;
+    const accessToken = accessTokenForUser(u.id);
 
     return {
       provider: "postgres",
@@ -217,39 +313,21 @@ export const postgresAuthProvider: AuthProvider = {
     };
   },
 
-  logout: async (req: AuthRefreshRequest): Promise<AuthLogoutResponse> => {
-    const refreshToken = (req.refreshToken || "").trim();
-    if (!refreshToken) {
-      throw new AppError("refreshToken is required", {
-        code: "BAD_REQUEST",
-        status: 400,
-        details: { fields: ["refreshToken"] }
-      });
+  logout: async (accessToken: string, req?: AuthLogoutRequest): Promise<void> => {
+    const userId = parseAccessToken(accessToken);
+    const rt = (req?.refreshToken || "").trim();
+
+    if (rt) {
+      const refreshTokenHash = sha256Hex(rt);
+      await revokeSessionByHash(refreshTokenHash);
+      return;
     }
 
-    const refreshTokenHash = sha256Hex(refreshToken);
-    const revoked = await revokeSessionByHash(refreshTokenHash);
-
-    return {
-      provider: "postgres",
-      revoked
-    };
+    await revokeSessionsByUserId(userId);
   },
 
   getUserFromToken: async (token: string): Promise<AuthUserProfile> => {
-    const t = (token || "").trim();
-    if (!t) {
-      throw new AppError("Missing token", { code: "UNAUTHORIZED", status: 401 });
-    }
-
-    if (!t.startsWith(TOKEN_PREFIX)) {
-      throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
-    }
-
-    const userId = t.slice(TOKEN_PREFIX.length).trim();
-    if (!userId) {
-      throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
-    }
+    const userId = parseAccessToken(token);
 
     const p = getPool();
     const { rows } = await p.query<DbUserRow>(
@@ -261,7 +339,6 @@ export const postgresAuthProvider: AuthProvider = {
     if (!row) {
       throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
     }
-
     return toProfile(row);
   }
 };

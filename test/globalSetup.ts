@@ -7,21 +7,18 @@ declare global {
 }
 
 export default async function globalSetup() {
-  // Unit tests should be deterministic and not depend on developer/prod env.
-  // The JWT module reads AUTH_JWT_SECRET from env.
+  // Force deterministic CI-safe provider for ALL unit/integration tests, regardless of developer env.
+  process.env.AUTH_PROVIDER = "fake";
+  process.env.NODE_ENV = "test";
+
+  // JWT unit tests require this even if the Netlify functions don't.
   if (!process.env.AUTH_JWT_SECRET) {
     process.env.AUTH_JWT_SECRET = "test-auth-jwt-secret-0123456789abcdef0123456789abcdef";
-  }
-
-  // Default to fake for CI-safe determinism unless a test explicitly overrides.
-  if (!process.env.AUTH_PROVIDER) {
-    process.env.AUTH_PROVIDER = "fake";
   }
 
   const harness = await startNetlifyDev();
   globalThis.__NETLIFY_DEV_HARNESS__ = harness;
 
-  // Tests expect this.
   process.env.TEST_BASE_URL = harness.baseUrl;
 }
 

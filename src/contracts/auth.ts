@@ -3,12 +3,18 @@ export type AuthLoginRequest = {
   password: string;
 };
 
+export type AuthRegisterRequest = {
+  email: string;
+  password: string;
+  displayName?: string;
+};
+
 export type AuthRefreshRequest = {
   refreshToken: string;
 };
 
 export type AuthLogoutRequest = {
-  refreshToken: string;
+  refreshToken?: string;
 };
 
 export type AuthUserProfile = {
@@ -27,17 +33,13 @@ export type AuthSession = {
 
 export type AuthProviderId = "fake" | "postgres" | "google" | "github";
 
-export type AuthResult = {
+export type AuthLoginResponse = {
   provider: AuthProviderId;
   session: AuthSession;
   user: AuthUserProfile;
 };
 
-export type AuthLoginResponse = AuthResult;
-export type AuthRefreshResponse = AuthResult;
+export type AuthRegisterResponse = AuthLoginResponse;
 
-export type AuthLogoutResponse = {
-  provider: AuthProviderId;
-  revoked: boolean;
-};
+export type AuthRefreshResponse = AuthLoginResponse;
 

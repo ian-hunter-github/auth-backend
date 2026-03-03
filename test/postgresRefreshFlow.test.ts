@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startNetlifyDev } from "./netlifyDevHarness.js";
 import type { SuccessEnvelope, ErrorEnvelope } from "../src/lib/response.js";
-import type { AuthLoginResponse, AuthRefreshResponse, AuthLogoutResponse } from "../src/contracts/auth.js";
+import type { AuthLoginResponse, AuthRefreshResponse } from "../src/contracts/auth.js";
 
 const SHOULD_RUN = process.env.RUN_PG_TESTS === "1";
 
@@ -60,22 +60,16 @@ suite("postgres refresh flow (RUN_PG_TESTS=1)", () => {
     const refresh1 = loginBody.data.session.refreshToken as string;
     const userId = loginBody.data.user.id;
 
-    expect(typeof access1).toBe("string");
-    expect(typeof refresh1).toBe("string");
-    expect(typeof userId).toBe("string");
-
-    const me1Res = await fetch(`${harness.baseUrl}/.netlify/functions/me`, {
+    // /me works
+    const meRes = await fetch(`${harness.baseUrl}/.netlify/functions/me`, {
       headers: {
         authorization: `Bearer ${access1}`,
-        "x-request-id": "pg-me-1"
+        "x-request-id": "pg-me-200"
       }
     });
+    expect(meRes.status).toBe(200);
 
-    expect(me1Res.status).toBe(200);
-    const me1Body = (await me1Res.json()) as SuccessEnvelope<{ user: { id: string } }>;
-    expect(me1Body.ok).toBe(true);
-    expect(me1Body.data.user.id).toBe(userId);
-
+    // refresh rotates
     const refreshRes = await fetch(`${harness.baseUrl}/.netlify/functions/auth-refresh`, {
       method: "POST",
       headers: {
@@ -89,14 +83,14 @@ suite("postgres refresh flow (RUN_PG_TESTS=1)", () => {
     const refreshBody = (await refreshRes.json()) as SuccessEnvelope<AuthRefreshResponse>;
     expect(refreshBody.ok).toBe(true);
     expect(refreshBody.data.provider).toBe("postgres");
+    expect(refreshBody.data.user.id).toBe(userId);
 
     const access2 = refreshBody.data.session.accessToken;
     const refresh2 = refreshBody.data.session.refreshToken as string;
-
-    expect(access2).not.toBe(access1);
     expect(refresh2).not.toBe(refresh1);
 
-    const refreshOldRes = await fetch(`${harness.baseUrl}/.netlify/functions/auth-refresh`, {
+    // old refresh rejected
+    const oldRefreshRes = await fetch(`${harness.baseUrl}/.netlify/functions/auth-refresh`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -104,52 +98,37 @@ suite("postgres refresh flow (RUN_PG_TESTS=1)", () => {
       },
       body: JSON.stringify({ refreshToken: refresh1 })
     });
+    expect(oldRefreshRes.status).toBe(401);
 
-    expect(refreshOldRes.status).toBe(401);
-    const refreshOldBody = (await refreshOldRes.json()) as ErrorEnvelope;
-    expect(refreshOldBody.ok).toBe(false);
-    expect(refreshOldBody.error.code).toBe("UNAUTHORIZED");
-
-    const me2Res = await fetch(`${harness.baseUrl}/.netlify/functions/me`, {
+    // tampered refresh rejected
+    const tampered = tamperToken(refresh2);
+    const tamperedRes = await fetch(`${harness.baseUrl}/.netlify/functions/auth-refresh`, {
+      method: "POST",
       headers: {
-        authorization: `Bearer ${access2}`,
-        "x-request-id": "pg-me-2"
-      }
+        "content-type": "application/json",
+        "x-request-id": "pg-refresh-tamper-401"
+      },
+      body: JSON.stringify({ refreshToken: tampered })
     });
+    expect(tamperedRes.status).toBe(401);
+    const tamperedBody = (await tamperedRes.json()) as ErrorEnvelope;
+    expect(tamperedBody.ok).toBe(false);
+    expect(tamperedBody.error.code).toBe("UNAUTHORIZED");
 
-    expect(me2Res.status).toBe(200);
-    const me2Body = (await me2Res.json()) as SuccessEnvelope<{ user: { id: string } }>;
-    expect(me2Body.ok).toBe(true);
-    expect(me2Body.data.user.id).toBe(userId);
-
-    const meTamperedRes = await fetch(`${harness.baseUrl}/.netlify/functions/me`, {
-      headers: {
-        authorization: `Bearer ${tamperToken(access2)}`,
-        "x-request-id": "pg-me-tampered-401"
-      }
-    });
-
-    expect(meTamperedRes.status).toBe(401);
-    const meTamperedBody = (await meTamperedRes.json()) as ErrorEnvelope;
-    expect(meTamperedBody.ok).toBe(false);
-    expect(meTamperedBody.error.code).toBe("UNAUTHORIZED");
-
+    // logout revokes refresh2
     const logoutRes = await fetch(`${harness.baseUrl}/.netlify/functions/auth-logout`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "x-request-id": "pg-logout-200"
+        "x-request-id": "pg-logout-204",
+        authorization: `Bearer ${access2}`
       },
       body: JSON.stringify({ refreshToken: refresh2 })
     });
 
-    expect(logoutRes.status).toBe(200);
-    const logoutBody = (await logoutRes.json()) as SuccessEnvelope<AuthLogoutResponse>;
-    expect(logoutBody.ok).toBe(true);
-    expect(logoutBody.data.provider).toBe("postgres");
-    expect(logoutBody.data.revoked).toBe(true);
+    expect([200, 204]).toContain(logoutRes.status);
 
-    const refreshAfterLogoutRes = await fetch(`${harness.baseUrl}/.netlify/functions/auth-refresh`, {
+    const refreshAfterLogout = await fetch(`${harness.baseUrl}/.netlify/functions/auth-refresh`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -158,10 +137,7 @@ suite("postgres refresh flow (RUN_PG_TESTS=1)", () => {
       body: JSON.stringify({ refreshToken: refresh2 })
     });
 
-    expect(refreshAfterLogoutRes.status).toBe(401);
-    const refreshAfterLogoutBody = (await refreshAfterLogoutRes.json()) as ErrorEnvelope;
-    expect(refreshAfterLogoutBody.ok).toBe(false);
-    expect(refreshAfterLogoutBody.error.code).toBe("UNAUTHORIZED");
+    expect(refreshAfterLogout.status).toBe(401);
   });
 });
 

@@ -18,7 +18,7 @@ export type ErrorEnvelope = {
   };
 };
 
-export function jsonOk<T>(statusCode: number, requestId: string, data: T): HandlerResponse {
+function jsonOk<T>(statusCode: number, requestId: string, data: T): HandlerResponse {
   const body: SuccessEnvelope<T> = { ok: true, requestId, data };
   return {
     statusCode,
@@ -27,6 +27,16 @@ export function jsonOk<T>(statusCode: number, requestId: string, data: T): Handl
       [REQUEST_ID_HEADER]: requestId
     },
     body: JSON.stringify(body)
+  };
+}
+
+export function jsonNoContent(statusCode: number, requestId: string): HandlerResponse {
+  return {
+    statusCode,
+    headers: {
+      [REQUEST_ID_HEADER]: requestId
+    },
+    body: ""
   };
 }
 
@@ -75,3 +85,6 @@ export function requireMethod(actual: string | undefined, allowed: string[]) {
     });
   }
 }
+
+export { jsonOk };
+

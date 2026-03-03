@@ -1,9 +1,11 @@
 import type {
   AuthLoginRequest,
   AuthLoginResponse,
-  AuthLogoutResponse,
+  AuthLogoutRequest,
   AuthRefreshRequest,
   AuthRefreshResponse,
+  AuthRegisterRequest,
+  AuthRegisterResponse,
   AuthUserProfile
 } from "../contracts/auth.js";
 import type { AuthProvider } from "./authProvider.js";
@@ -34,12 +36,16 @@ export async function login(req: AuthLoginRequest): Promise<AuthLoginResponse> {
   return selectProvider().login(req);
 }
 
+export async function register(req: AuthRegisterRequest): Promise<AuthRegisterResponse> {
+  return selectProvider().register(req);
+}
+
 export async function refresh(req: AuthRefreshRequest): Promise<AuthRefreshResponse> {
   return selectProvider().refresh(req);
 }
 
-export async function logout(req: AuthRefreshRequest): Promise<AuthLogoutResponse> {
-  return selectProvider().logout(req);
+export async function logout(accessToken: string, req?: AuthLogoutRequest): Promise<void> {
+  return selectProvider().logout(accessToken, req);
 }
 
 export async function getUserFromToken(token: string): Promise<AuthUserProfile> {

@@ -17,9 +17,9 @@ describe("POST /.netlify/functions/auth-login", () => {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "x-request-id": "test-auth-401",
+        "x-request-id": "test-auth-401"
       },
-      body: JSON.stringify({ username: "demo", password: "bad" }),
+      body: JSON.stringify({ username: "demo", password: "bad" })
     });
 
     expect(res.status).toBe(401);
@@ -33,9 +33,9 @@ describe("POST /.netlify/functions/auth-login", () => {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "x-request-id": "test-auth-200",
+        "x-request-id": "test-auth-200"
       },
-      body: JSON.stringify({ username: "demo", password: "letmein" }),
+      body: JSON.stringify({ username: "demo", password: "letmein" })
     });
 
     expect(res.status).toBe(200);
@@ -46,6 +46,7 @@ describe("POST /.netlify/functions/auth-login", () => {
     expect(body.data.user.username).toBe("demo");
     expect(typeof body.data.session.accessToken).toBe("string");
     expect(body.data.session.tokenType).toBe("bearer");
+    expect(typeof body.data.session.refreshToken).toBe("string");
   });
 });
 
