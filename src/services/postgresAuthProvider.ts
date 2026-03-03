@@ -1,4 +1,5 @@
 import pg from "pg";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { AppError } from "../lib/errors.js";
 import { getEnv, requireEnv } from "../lib/env.js";
 import type { AuthProvider } from "./authProvider.js";
@@ -6,7 +7,15 @@ import type { AuthLoginRequest, AuthLoginResponse, AuthUserProfile } from "../co
 
 const { Pool } = pg;
 
-type DbUserRow = {
+type DbUserAuthRow = {
+  id: string;
+  email: string;
+  display_name: string;
+  password_salt: string;
+  password_hash: string;
+};
+
+type DbUserProfileRow = {
   id: string;
   email: string;
   display_name: string;
@@ -38,7 +47,7 @@ function getPool(): pg.Pool {
   return pool;
 }
 
-function toProfile(row: DbUserRow): AuthUserProfile {
+function toProfile(row: { id: string; email: string; display_name: string }): AuthUserProfile {
   return {
     id: row.id,
     username: row.email,
@@ -47,12 +56,24 @@ function toProfile(row: DbUserRow): AuthUserProfile {
   };
 }
 
-// Phase 2 minimal Postgres-backed provider:
-// - Uses identity.users (seeded) to resolve user profile.
-// - Does NOT implement a full password system yet.
-// - Deterministic dev mapping: demo/letmein -> demo@example.com (seeded user).
+function sha256Hex(s: string): string {
+  return createHash("sha256").update(s, "utf8").digest("hex");
+}
+
+function constantTimeEqHex(a: string, b: string): boolean {
+  if (!a || !b) return false;
+  if (a.length !== b.length) return false;
+  try {
+    const ab = Buffer.from(a, "hex");
+    const bb = Buffer.from(b, "hex");
+    if (ab.length !== bb.length) return false;
+    return timingSafeEqual(ab, bb);
+  } catch {
+    return false;
+  }
+}
+
 const DEMO_EMAIL = "demo@example.com";
-const DEMO_PASSWORD = "letmein";
 const TOKEN_PREFIX = "pg-access-token.";
 
 export const postgresAuthProvider: AuthProvider = {
@@ -68,22 +89,24 @@ export const postgresAuthProvider: AuthProvider = {
       });
     }
 
-    // Deterministic demo-only behaviour for now.
-    // Treat "demo" as shorthand for the seeded email.
+    // Convenience: allow "demo" as shorthand for the seeded email.
     const email = username === "demo" ? DEMO_EMAIL : username;
 
-    if (!(email === DEMO_EMAIL && password === DEMO_PASSWORD)) {
-      throw new AppError("Invalid credentials", { code: "UNAUTHORIZED", status: 401 });
-    }
-
     const p = getPool();
-    const { rows } = await p.query<DbUserRow>(
-      "select id, email, display_name from identity.users where email = $1 limit 1",
+    const { rows } = await p.query<DbUserAuthRow>(
+      "select id, email, display_name, password_salt, password_hash from identity.users where email = $1 limit 1",
       [email]
     );
 
     const row = rows[0];
     if (!row) {
+      throw new AppError("Invalid credentials", { code: "UNAUTHORIZED", status: 401 });
+    }
+
+    const expected = row.password_hash;
+    const actual = sha256Hex(`${row.password_salt}${password}`);
+
+    if (!constantTimeEqHex(expected, actual)) {
       throw new AppError("Invalid credentials", { code: "UNAUTHORIZED", status: 401 });
     }
 
@@ -115,7 +138,7 @@ export const postgresAuthProvider: AuthProvider = {
     }
 
     const p = getPool();
-    const { rows } = await p.query<DbUserRow>(
+    const { rows } = await p.query<DbUserProfileRow>(
       "select id, email, display_name from identity.users where id = $1::uuid limit 1",
       [userId]
     );
