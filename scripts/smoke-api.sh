@@ -6,11 +6,11 @@ if [[ "${1:-}" == "--debug" ]]; then
   DEBUG=1
 fi
 
-# Smoke test (scheme A): Fake provider only.
+# Smoke test (scheme A).
 #
 # Assumptions:
 # - Your Netlify dev server is already running (e.g. `netlify dev ...`)
-# - Fake auth provider is active (default)
+# - AUTH_PROVIDER is active (default)
 #
 # Usage:
 #   scripts/smoke-api.sh [--debug]
@@ -268,8 +268,8 @@ fi
 # /me may (currently) not include provider in its response body.
 # If it does, it must be 'fake' for this smoke scenario.
 me_provider="$(node_json_get_first "$me_body" "provider" "data.provider")"
-if [[ -n "${me_provider:-}" && "$me_provider" != "fake" ]]; then
-  echo "ERROR: expected /me provider 'fake' but got '${me_provider:-<empty>}'" >&2
+if [[ -n "${me_provider:-}" && "$me_provider" != "$provider" ]]; then
+  echo "ERROR: expected /me provider '$provider' but got '${me_provider:-<empty>}'" >&2
   echo "$me_body" >&2
   exit 1
 fi
@@ -281,4 +281,4 @@ if [[ -z "$me_user_id" ]]; then
   exit 1
 fi
 
-echo "OK: smoke test passed (fake)"
+echo "OK: smoke test passed ($provider)"
