@@ -6,6 +6,7 @@ export default async function globalTeardown() {
     await harness.stop();
   } finally {
     globalThis.__NETLIFY_DEV_HARNESS__ = undefined;
+    delete process.env.TEST_BASE_URL;
   }
 }
 

@@ -3,6 +3,7 @@ import net from "node:net";
 
 type Harness = {
   baseUrl: string;
+  pid: number;
   stop: () => Promise<void>;
 };
 
@@ -37,11 +38,32 @@ async function waitForHealthy(baseUrl: string, timeoutMs: number) {
       const res = await fetch(`${baseUrl}/.netlify/functions/health`);
       if (res.ok) return;
     } catch {
-      // ignore: netlify dev may not be ready yet
+      // netlify dev not ready yet
     }
     await sleep(250);
   }
   throw new Error("Timed out waiting for netlify dev");
+}
+
+type KillSignal = Parameters<typeof process.kill>[1];
+
+function killProcessTree(pid: number, signal: KillSignal) {
+  if (pid <= 0) return;
+
+  if (process.platform !== "win32") {
+    try {
+      process.kill(-pid, signal);
+      return;
+    } catch {
+      // fallback to direct kill
+    }
+  }
+
+  try {
+    process.kill(pid, signal);
+  } catch {
+    // process may already be gone
+  }
 }
 
 export async function startNetlifyDev(): Promise<Harness> {
@@ -55,94 +77,61 @@ export async function startNetlifyDev(): Promise<Harness> {
 
   const staticPort = await pickPort(staticPreferred, { exclude: new Set([proxyPort]) });
 
-  const child = spawn(
-    process.platform === "win32" ? "npx.cmd" : "npx",
-    [
-      "netlify",
-      "dev",
-      "--offline",
-      "--no-open",
-      "--port",
-      String(proxyPort),
-      "--staticServerPort",
-      String(staticPort)
-    ],
-    {
-      stdio: "pipe",
-      env: {
-        ...process.env,
-        NETLIFY_DEV: "true",
-        NETLIFY_TELEMETRY_DISABLED: "1"
-      }
+  const cmd = process.platform === "win32" ? "npx.cmd" : "npx";
+  const args = [
+    "netlify",
+    "dev",
+    "--offline",
+    "--no-open",
+    "--port",
+    String(proxyPort),
+    "--staticServerPort",
+    String(staticPort)
+  ];
+
+  // IMPORTANT:
+  // Using stdio: "ignore" prevents PIPEWRAP/FILEHANDLE handles from keeping Vitest alive.
+  // We rely on health polling for readiness and return a helpful error message on failure.
+  const child = spawn(cmd, args, {
+    stdio: "ignore",
+    detached: process.platform !== "win32",
+    env: {
+      ...process.env,
+      NETLIFY_DEV: "true",
+      NETLIFY_TELEMETRY_DISABLED: "1"
     }
-  );
+  });
 
-  // Capture output for error reporting, but ensure we can fully close the pipes on teardown.
-  let output = "";
-  const onStdout = (d: Buffer) => {
-    output += d.toString();
-  };
-  const onStderr = (d: Buffer) => {
-    output += d.toString();
-  };
-
-  child.stdout?.on("data", onStdout);
-  child.stderr?.on("data", onStderr);
+  // Allow the parent process to exit even if a child lingers.
+  // We still attempt to terminate it in globalTeardown.
+  child.unref();
 
   const baseUrl = `http://localhost:${proxyPort}`;
 
   try {
     await waitForHealthy(baseUrl, 90000);
   } catch (err) {
-    try {
-      child.kill("SIGTERM");
-    } catch {
-      // ignore: child may already be exiting
-    }
-
+    killProcessTree(child.pid ?? 0, "SIGTERM");
     const original = err instanceof Error ? err.message : String(err);
     throw new Error(
-      `Failed to start netlify dev.\n\nBase URL: ${baseUrl}\nProxy port: ${proxyPort}\nStatic port: ${staticPort}\n\nOriginal error: ${original}\n\nnetlify dev output:\n${output}\n`
+      `Failed to start netlify dev.\n\nBase URL: ${baseUrl}\nProxy port: ${proxyPort}\nStatic port: ${staticPort}\n\nOriginal error: ${original}\n\nTip: run manually for logs:\n  npx netlify dev --offline --no-open --port ${proxyPort} --staticServerPort ${staticPort}\n`
     );
   }
 
   return {
     baseUrl,
+    pid: child.pid ?? 0,
     stop: async () => {
-      if (child.killed) return;
+      if (child.exitCode !== null) return;
 
-      // Important for Vitest "hanging-process" reporter:
-      // close/destroy stdio pipes and remove listeners so they don't keep the process alive.
-      try {
-        child.stdout?.off("data", onStdout);
-        child.stderr?.off("data", onStderr);
-      } catch {
-        // ignore
-      }
+      const pid = child.pid ?? 0;
 
-      try {
-        child.stdin?.end();
-      } catch {
-        // ignore
-      }
-
-      try {
-        child.stdout?.destroy();
-      } catch {
-        // ignore
-      }
-
-      try {
-        child.stderr?.destroy();
-      } catch {
-        // ignore
-      }
+      killProcessTree(pid, "SIGTERM");
 
       await new Promise<void>((resolve) => {
         child.once("exit", () => resolve());
-        child.kill("SIGTERM");
         setTimeout(() => {
-          if (!child.killed) child.kill("SIGKILL");
+          killProcessTree(pid, "SIGKILL");
           resolve();
         }, 5000);
       });

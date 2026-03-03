@@ -15,7 +15,7 @@
     "test": "vitest",
     "test:run": "vitest run",
     "ci": "npm run lint && npm run typecheck && npm run test:run",
-    "check:ci": "./scripts/check-ci.sh",
+    "check:ci": "./scripts/check-ci-local.sh",
     "api:docs": "./scripts/api-docs.sh"
   },
   "dependencies": {
@@ -34,7 +34,7 @@
     "globals": "^15.9.0",
     "netlify-cli": "^18.0.0",
     "prettier": "^3.3.3",
-    "typescript": "^5.6.3",
+    "typescript": "^5.9.3",
     "vitest": "^2.1.8",
     "widdershins": "^4.0.1"
   }

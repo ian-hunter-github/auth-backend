@@ -18,6 +18,10 @@ export default async function globalSetup() {
     process.env.AUTH_PROVIDER = "fake";
   }
 
-  globalThis.__NETLIFY_DEV_HARNESS__ = await startNetlifyDev();
+  const harness = await startNetlifyDev();
+  globalThis.__NETLIFY_DEV_HARNESS__ = harness;
+
+  // Tests expect this.
+  process.env.TEST_BASE_URL = harness.baseUrl;
 }
 

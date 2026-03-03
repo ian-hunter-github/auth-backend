@@ -17,27 +17,28 @@ export function getHealth(): HealthResponse {
     version: getEnv("APP_VERSION") || "0.1.0",
     timestamp: new Date().toISOString(),
     build: {
-      node: process.version,
+      node: process.version
     },
     env: {
-      authProvider,
+      ...(authProvider ? { authProvider } : {}),
       postgres: {
         hasHost: has("PGHOST"),
         hasDatabase: has("PGDATABASE"),
         hasUser: has("PGUSER"),
         hasPassword: has("PGPASSWORD"),
         hasPort: has("PGPORT"),
-        hasSslMode: has("PGSSLMODE"),
+        hasSslMode: has("PGSSLMODE")
       },
       supabase: {
         hasUrl: false,
-        hasAnonKey: false,
+        hasAnonKey: false
       },
       netlify: {
         ...(context ? { context } : {}),
         ...(deployId ? { deployId } : {}),
-        ...(siteId ? { siteId } : {}),
-      },
-    },
+        ...(siteId ? { siteId } : {})
+      }
+    }
   };
 }
+
