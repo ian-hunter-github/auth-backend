@@ -7,4 +7,25 @@ export type HealthResponse = {
     buildId?: string;
     node: string;
   };
+  env: {
+    authProvider?: string;
+    postgres: {
+      hasHost: boolean;
+      hasDatabase: boolean;
+      hasUser: boolean;
+      hasPassword: boolean;
+      hasPort: boolean;
+      hasSslMode: boolean;
+    };
+    supabase: {
+      hasUrl: boolean;
+      hasAnonKey: boolean;
+    };
+    netlify: {
+      context?: string;
+      deployId?: string;
+      siteId?: string;
+    };
+  };
 };
+
