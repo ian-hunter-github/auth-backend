@@ -1,8 +1,3 @@
-export type AuthLoginRequest = {
-  username: string;
-  password: string;
-};
-
 export type AuthUserProfile = {
   id: string;
   username: string;
@@ -19,8 +14,14 @@ export type AuthSession = {
 
 export type AuthProviderId = "fake" | "postgres" | "google" | "github";
 
+export type AuthLoginRequest = {
+  username: string;
+  password: string;
+};
+
 export type AuthLoginResponse = {
   provider: AuthProviderId;
   session: AuthSession;
   user: AuthUserProfile;
 };
+

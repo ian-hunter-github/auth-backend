@@ -1,0 +1,41 @@
+name: Netlify Deploy Preview Smoke
+
+on:
+  deployment_status:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Smoke test deployed preview
+    runs-on: ubuntu-latest
+    if: >
+      github.event.deployment_status.state == 'success' &&
+      github.event.deployment_status.environment_url != '' &&
+      contains(github.event.deployment_status.environment_url, 'netlify.app')
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run smoke against deploy preview
+        env:
+          BASE_URL: ${{ github.event.deployment_status.environment_url }}
+        run: |
+          set -euo pipefail
+          echo "Deploy preview URL: ${BASE_URL}"
+
+          # Quick retry to avoid flake if the deploy URL is live but functions are still warming up.
+          for i in 1 2 3 4 5; do
+            echo "Smoke attempt ${i}..."
+            if ./scripts/smoke-api.sh --debug; then
+              echo "Smoke passed."
+              exit 0
+            fi
+            echo "Smoke failed; retrying in 5s..."
+            sleep 5
+          done
+
+          echo "Smoke failed after retries."
+          exit 1

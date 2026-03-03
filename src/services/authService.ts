@@ -2,8 +2,8 @@ import type { AuthLoginRequest, AuthLoginResponse, AuthUserProfile } from "../co
 import type { AuthProvider } from "./authProvider.js";
 import { fakeAuthProvider } from "./fakeAuthProvider.js";
 import { postgresAuthProvider } from "./postgresAuthProvider.js";
-
 import { getEnv } from "../lib/env.js";
+import { AppError } from "../lib/errors.js";
 
 function selectProvider(): AuthProvider {
   const explicit = getEnv("AUTH_PROVIDER");
@@ -11,11 +11,17 @@ function selectProvider(): AuthProvider {
     const p = explicit.toLowerCase();
     if (p === "fake") return fakeAuthProvider;
     if (p === "postgres") return postgresAuthProvider;
+
+    throw new AppError(`Unknown AUTH_PROVIDER: ${explicit}`, {
+      code: "INTERNAL_ERROR",
+      status: 500,
+      details: { name: "AUTH_PROVIDER", value: explicit }
+    });
   }
 
   // Deterministic default:
   // - In local Netlify Dev / test harness runs, default to FAKE unless explicitly overridden.
-  // - In deployed environments, default to postgres.
+  // - In deployed environments, default to Postgres.
   const isNetlifyDev = (getEnv("NETLIFY_DEV") || "").toLowerCase() === "true";
   const isTest = (getEnv("NODE_ENV") || "").toLowerCase() === "test";
 
@@ -30,3 +36,4 @@ export async function login(req: AuthLoginRequest): Promise<AuthLoginResponse> {
 export async function getUserFromToken(token: string): Promise<AuthUserProfile> {
   return selectProvider().getUserFromToken(token);
 }
+
