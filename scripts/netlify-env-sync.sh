@@ -7,6 +7,10 @@ SITE_ARG=""
 CONTEXTS_CSV="production,deploy-preview,branch-deploy"
 FILES=(".env.production" "postgres/env/neon/.env")
 
+DO_DEPLOY=0
+DEPLOY_MODE="prod"      # prod|preview
+DEPLOY_NO_BUILD=0
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dry-run)
@@ -37,6 +41,20 @@ while [[ $# -gt 0 ]]; do
       fi
       FILES+=("$f")
       shift 2
+      ;;
+    --deploy)
+      DO_DEPLOY=1
+      DEPLOY_MODE="prod"
+      shift
+      ;;
+    --deploy-preview)
+      DO_DEPLOY=1
+      DEPLOY_MODE="preview"
+      shift
+      ;;
+    --no-build)
+      DEPLOY_NO_BUILD=1
+      shift
       ;;
     -*)
       echo "ERROR: unknown option: $1" >&2
@@ -231,7 +249,28 @@ done
 echo ""
 if [[ "$DRY_RUN" -eq 1 ]]; then
   echo "Dry-run complete. No changes made."
-else
-  echo "Sync complete."
-  echo "Next: trigger a deploy so the new env vars are guaranteed to be live."
+  exit 0
 fi
+
+echo "Sync complete."
+
+if [[ "$DO_DEPLOY" -ne 1 ]]; then
+  echo "Next: trigger a deploy so the new env vars are guaranteed to be live."
+  echo "  - netlify deploy --prod"
+  exit 0
+fi
+
+DEPLOY_ARGS=()
+if [[ "$DEPLOY_NO_BUILD" -eq 1 ]]; then
+  DEPLOY_ARGS+=(--no-build)
+fi
+
+echo ""
+if [[ "$DEPLOY_MODE" == "preview" ]]; then
+  echo "Triggering Netlify deploy (preview)..."
+  netlify deploy "${DEPLOY_ARGS[@]}" "${SITE_FLAGS[@]}"
+else
+  echo "Triggering Netlify deploy (production)..."
+  netlify deploy --prod "${DEPLOY_ARGS[@]}" "${SITE_FLAGS[@]}"
+fi
+
