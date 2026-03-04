@@ -1,4 +1,3 @@
-import type { RequestContext } from "../security/requestContext.js";
 import type {
   AuthLoginRequest,
   AuthLoginResponse,
@@ -14,13 +13,22 @@ import { fakeAuthProvider } from "./fakeAuthProvider.js";
 import { postgresAuthProvider } from "./postgresAuthProvider.js";
 
 import { getEnv } from "../lib/env.js";
+import { AppError } from "../lib/errors.js";
 
-function selectProvider(): AuthProvider {
+export type AuthProviderName = "fake" | "postgres";
+
+export function getSelectedAuthProviderName(): AuthProviderName {
   const explicit = getEnv("AUTH_PROVIDER");
   if (explicit) {
     const p = explicit.toLowerCase();
-    if (p === "fake") return fakeAuthProvider;
-    if (p === "postgres") return postgresAuthProvider;
+    if (p === "fake") return "fake";
+    if (p === "postgres") return "postgres";
+
+    throw new AppError("Invalid AUTH_PROVIDER", {
+      code: "INTERNAL_ERROR",
+      status: 500,
+      details: { value: explicit, allowed: ["fake", "postgres"] }
+    });
   }
 
   // Deterministic default:
@@ -29,24 +37,29 @@ function selectProvider(): AuthProvider {
   const isNetlifyDev = (getEnv("NETLIFY_DEV") || "").toLowerCase() === "true";
   const isTest = (getEnv("NODE_ENV") || "").toLowerCase() === "test";
 
-  if (isNetlifyDev || isTest) return fakeAuthProvider;
-  return postgresAuthProvider;
+  if (isNetlifyDev || isTest) return "fake";
+  return "postgres";
 }
 
-export async function login(req: AuthLoginRequest, ctx?: RequestContext): Promise<AuthLoginResponse> {
-  return selectProvider().login(req, ctx);
+function selectProvider(): AuthProvider {
+  const name = getSelectedAuthProviderName();
+  return name === "fake" ? fakeAuthProvider : postgresAuthProvider;
 }
 
-export async function register(req: AuthRegisterRequest, ctx?: RequestContext): Promise<AuthRegisterResponse> {
-  return selectProvider().register(req, ctx);
+export async function login(req: AuthLoginRequest): Promise<AuthLoginResponse> {
+  return selectProvider().login(req);
 }
 
-export async function refresh(req: AuthRefreshRequest, ctx?: RequestContext): Promise<AuthRefreshResponse> {
-  return selectProvider().refresh(req, ctx);
+export async function register(req: AuthRegisterRequest): Promise<AuthRegisterResponse> {
+  return selectProvider().register(req);
 }
 
-export async function logout(accessToken: string, req?: AuthLogoutRequest, ctx?: RequestContext): Promise<void> {
-  return selectProvider().logout(accessToken, req, ctx);
+export async function refresh(req: AuthRefreshRequest): Promise<AuthRefreshResponse> {
+  return selectProvider().refresh(req);
+}
+
+export async function logout(accessToken: string, req?: AuthLogoutRequest): Promise<void> {
+  return selectProvider().logout(accessToken, req);
 }
 
 export async function getUserFromToken(token: string): Promise<AuthUserProfile> {
