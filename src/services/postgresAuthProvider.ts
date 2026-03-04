@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import pg from "pg";
 import { AppError } from "../lib/errors.js";
 import { getEnv, requireEnv } from "../lib/env.js";
-import { signAccessToken, verifyAccessToken } from "../lib/jwt.js";
+import type { RequestContext } from "../security/requestContext.js";
 import type { AuthProvider, CreateUserInput, UpdateUserInput } from "./authProvider.js";
 import type {
   AuthLoginRequest,
@@ -95,8 +95,8 @@ function addMinutesIso(minutes: number) {
   return new Date(Date.now() + minutes * 60_000).toISOString();
 }
 
-function accessTokenForUser(userId: string): string {
-  return signAccessToken(userId).token;
+function accessTokenForUser(userId: string, sessionId: string): string {
+  return `${TOKEN_PREFIX}${userId}.${sessionId}`;
 }
 
 function isUuid(v: string): boolean {
@@ -105,38 +105,42 @@ function isUuid(v: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 }
 
-function parseAccessToken(token: string): string {
+function parseAccessToken(token: string): { userId: string; sessionId: string } {
   const t = (token || "").trim();
   if (!t) throw new AppError("Missing token", { code: "UNAUTHORIZED", status: 401 });
+  if (!t.startsWith(TOKEN_PREFIX)) throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
+  const rest = t.slice(TOKEN_PREFIX.length);
+  if (!rest) throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
 
-  // Backward compatible legacy token format.
-  if (t.startsWith(TOKEN_PREFIX)) {
-    const userId = t.slice(TOKEN_PREFIX.length);
-    if (!userId) throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
-    if (!isUuid(userId)) throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
-    return userId;
-  }
-
-  const verified = verifyAccessToken(t);
-  if (!isUuid(verified.userId)) throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
-  return verified.userId;
+  const parts = rest.split(".");
+  const userId = (parts[0] || "").trim();
+  const sessionId = (parts[1] || "").trim();
+  if (!userId || !sessionId) throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
+  if (!isUuid(userId) || !isUuid(sessionId)) throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
+  return { userId, sessionId };
 }
 
-async function createSession(userId: string): Promise<{ refreshToken: string; expiresAt: string }> {
+async function createSession(userId: string): Promise<{ sessionId: string; refreshToken: string; expiresAt: string }> {
   const refreshToken = `pg-refresh-token.${randomHex(24)}`;
   const refreshTokenHash = sha256Hex(refreshToken);
-  const expiresAt = addMinutesIso(60 * 24 * 7);
+  const expiresAt = addMinutesIso(60);
 
   const p = getPool();
-  await p.query(
+  const { rows } = await p.query<{ id: string }>(
     `
     insert into identity.sessions (user_id, refresh_token_hash, expires_at)
     values ($1::uuid, $2, $3::timestamptz)
+    returning id
     `,
     [userId, refreshTokenHash, expiresAt]
   );
 
-  return { refreshToken, expiresAt };
+  const sessionId = (rows[0]?.id || "").trim();
+  if (!sessionId || !isUuid(sessionId)) {
+    throw new AppError("Failed to create session", { code: "INTERNAL_ERROR", status: 500 });
+  }
+
+  return { sessionId, refreshToken, expiresAt };
 }
 
 async function revokeSessionByHash(refreshTokenHash: string): Promise<void> {
@@ -163,6 +167,26 @@ async function revokeSessionsByUserId(userId: string): Promise<void> {
     `,
     [userId, nowIso()]
   );
+}
+
+async function requireActiveSession(sessionId: string, userId: string): Promise<void> {
+  const p = getPool();
+  const { rows } = await p.query<{ id: string }>(
+    `
+    select id
+    from identity.sessions
+    where id = $1::uuid
+      and user_id = $2::uuid
+      and revoked_at is null
+      and expires_at > now()
+    limit 1
+    `,
+    [sessionId, userId]
+  );
+
+  if (!rows[0]) {
+    throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
+  }
 }
 
 function requirePasswordFields(row: DbUserRow): { salt: string; hash: string } {
@@ -219,8 +243,8 @@ export const postgresAuthProvider: AuthProvider = {
       throw new AppError("Invalid credentials", { code: "UNAUTHORIZED", status: 401 });
     }
 
-    const accessToken = accessTokenForUser(row.id);
-    const { refreshToken, expiresAt } = await createSession(row.id);
+    const { sessionId, refreshToken, expiresAt } = await createSession(row.id);
+    const accessToken = accessTokenForUser(row.id, sessionId);
 
     return {
       provider: "postgres",
@@ -272,8 +296,8 @@ export const postgresAuthProvider: AuthProvider = {
     const u = rows[0];
     if (!u) throw new AppError("Failed to create user", { code: "INTERNAL_ERROR", status: 500 });
 
-    const accessToken = accessTokenForUser(u.id);
-    const { refreshToken, expiresAt } = await createSession(u.id);
+    const { sessionId, refreshToken, expiresAt } = await createSession(u.id);
+    const accessToken = accessTokenForUser(u.id, sessionId);
 
     return {
       provider: "postgres",
@@ -297,11 +321,8 @@ export const postgresAuthProvider: AuthProvider = {
       });
     }
 
-    if (!refreshToken.startsWith("pg-refresh-token.")) {
-      throw new AppError("Invalid refresh token", { code: "UNAUTHORIZED", status: 401 });
-    }
-
     const refreshTokenHash = sha256Hex(refreshToken);
+
     const p = getPool();
     const { rows } = await p.query<DbSessionRow>(
       `
@@ -314,29 +335,34 @@ export const postgresAuthProvider: AuthProvider = {
     );
 
     const s = rows[0];
-    if (!s) throw new AppError("Invalid refresh token", { code: "UNAUTHORIZED", status: 401 });
-    if (s.revoked_at) throw new AppError("Refresh token revoked", { code: "UNAUTHORIZED", status: 401 });
-
-    const now = new Date();
-    const exp = new Date(s.expires_at);
-    if (Number.isNaN(exp.getTime()) || now.getTime() > exp.getTime()) {
-      throw new AppError("Refresh token expired", { code: "UNAUTHORIZED", status: 401 });
+    if (!s) {
+      throw new AppError("Invalid refresh token", { code: "UNAUTHORIZED", status: 401 });
     }
 
-    await revokeSessionByHash(refreshTokenHash);
+    if (s.revoked_at) {
+      throw new AppError("Invalid refresh token", { code: "UNAUTHORIZED", status: 401 });
+    }
 
-    const { refreshToken: nextRefreshToken, expiresAt } = await createSession(s.user_id);
+    if (new Date(s.expires_at).getTime() <= Date.now()) {
+      throw new AppError("Invalid refresh token", { code: "UNAUTHORIZED", status: 401 });
+    }
 
-    const { rows: urows } = await p.query<DbUserRow>(
+    const { rows: users } = await p.query<DbUserRow>(
       "select id, email, display_name, roles, deleted_at, password_salt, password_hash from identity.users where id = $1::uuid limit 1",
       [s.user_id]
     );
 
-    const u = urows[0];
-    if (!u) throw new AppError("Invalid refresh token", { code: "UNAUTHORIZED", status: 401 });
+    const u = users[0];
+    if (!u) {
+      throw new AppError("Invalid refresh token", { code: "UNAUTHORIZED", status: 401 });
+    }
     requireNotDeleted(u);
 
-    const accessToken = accessTokenForUser(u.id);
+    await revokeSessionByHash(refreshTokenHash);
+
+    const { sessionId, refreshToken: nextRefreshToken, expiresAt } = await createSession(s.user_id);
+
+    const accessToken = accessTokenForUser(u.id, sessionId);
 
     return {
       provider: "postgres",
@@ -350,56 +376,57 @@ export const postgresAuthProvider: AuthProvider = {
     };
   },
 
-  logout: async (accessToken: string, req?: AuthLogoutRequest): Promise<void> => {
-    const tokenUserId = parseAccessToken(accessToken);
-
+  logout: async (accessToken: string, req?: AuthLogoutRequest, _ctx?: RequestContext): Promise<void> => {
     const refreshToken = (req?.refreshToken || "").trim();
+
     if (refreshToken) {
-      await revokeSessionByHash(sha256Hex(refreshToken));
+      const refreshTokenHash = sha256Hex(refreshToken);
+      await revokeSessionByHash(refreshTokenHash);
       return;
     }
 
-    await revokeSessionsByUserId(tokenUserId);
+    const { userId } = parseAccessToken(accessToken);
+    await revokeSessionsByUserId(userId);
   },
 
   getUserFromToken: async (token: string): Promise<AuthUserProfile> => {
-    const userId = parseAccessToken(token);
+    const { userId, sessionId } = parseAccessToken(token);
+
+    await requireActiveSession(sessionId, userId);
 
     const p = getPool();
     const { rows } = await p.query<DbUserRow>(
-      "select id, email, display_name, roles, deleted_at from identity.users where id = $1::uuid limit 1",
+      "select id, email, display_name, roles, deleted_at, password_salt, password_hash from identity.users where id = $1::uuid limit 1",
       [userId]
     );
 
     const row = rows[0];
-    if (!row) throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
-
+    if (!row) {
+      throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
+    }
     requireNotDeleted(row);
+
     return toProfile(row);
   },
 
   listUsers: async (): Promise<AuthUserProfile[]> => {
     const p = getPool();
     const { rows } = await p.query<DbUserRow>(
-      "select id, email, display_name, roles, deleted_at from identity.users where deleted_at is null order by email asc"
+      "select id, email, display_name, roles, deleted_at from identity.users where deleted_at is null order by created_at desc"
     );
     return rows.map(toProfile);
   },
 
   getUserById: async (id: string): Promise<AuthUserProfile> => {
-    const userId = (id || "").trim();
-    if (!isUuid(userId)) throw new AppError("Invalid id", { code: "BAD_REQUEST", status: 400 });
+    if (!isUuid(id)) throw new AppError("Not found", { code: "NOT_FOUND", status: 404 });
 
     const p = getPool();
     const { rows } = await p.query<DbUserRow>(
       "select id, email, display_name, roles, deleted_at from identity.users where id = $1::uuid limit 1",
-      [userId]
+      [id]
     );
-
     const row = rows[0];
-    if (!row) throw new AppError("User not found", { code: "NOT_FOUND", status: 404 });
-
-    requireNotDeleted(row);
+    if (!row || row.deleted_at) throw new AppError("Not found", { code: "NOT_FOUND", status: 404 });
     return toProfile(row);
   },
 
@@ -433,7 +460,7 @@ export const postgresAuthProvider: AuthProvider = {
       `
       insert into identity.users (email, display_name, roles, password_salt, password_hash)
       values ($1, $2, $3, $4, $5)
-      returning id, email, display_name, roles, deleted_at, password_salt, password_hash
+      returning id, email, display_name, roles, deleted_at
       `,
       [email, displayName || email, roles, salt, hash]
     );
@@ -444,50 +471,64 @@ export const postgresAuthProvider: AuthProvider = {
   },
 
   updateUser: async (id: string, input: UpdateUserInput): Promise<AuthUserProfile> => {
-    const userId = (id || "").trim();
-    if (!isUuid(userId)) throw new AppError("Invalid id", { code: "BAD_REQUEST", status: 400 });
+    if (!isUuid(id)) throw new AppError("Not found", { code: "NOT_FOUND", status: 404 });
 
-    const displayName = (input.displayName || "").trim();
+    const displayName = input.displayName === undefined ? undefined : (input.displayName || "").trim();
     const roles = input.roles === undefined ? undefined : normalizeRoles(input.roles);
 
     const p = getPool();
+
+    const { rows: existing } = await p.query<DbUserRow>(
+      "select id, email, display_name, roles, deleted_at from identity.users where id = $1::uuid limit 1",
+      [id]
+    );
+    const current = existing[0];
+    if (!current || current.deleted_at) throw new AppError("Not found", { code: "NOT_FOUND", status: 404 });
+
+    const nextDisplayName = displayName === undefined ? current.display_name : displayName || current.email;
+    const nextRoles = roles === undefined ? (Array.isArray(current.roles) ? current.roles : ["user"]) : roles;
+
     const { rows } = await p.query<DbUserRow>(
       `
       update identity.users
-      set
-        display_name = coalesce($2::text, display_name),
-        roles = coalesce($3::text[], roles)
+      set display_name = $2,
+          roles = $3,
+          updated_at = now()
       where id = $1::uuid
       returning id, email, display_name, roles, deleted_at
       `,
-      [userId, displayName ? displayName : null, roles ? roles : null]
+      [id, nextDisplayName, nextRoles]
     );
 
-    const row = rows[0];
-    if (!row) throw new AppError("User not found", { code: "NOT_FOUND", status: 404 });
+    const updated = rows[0];
+    if (!updated) throw new AppError("Not found", { code: "NOT_FOUND", status: 404 });
 
-    requireNotDeleted(row);
-    return toProfile(row);
+    return toProfile(updated);
   },
 
   deleteUser: async (id: string): Promise<void> => {
-    const userId = (id || "").trim();
-    if (!isUuid(userId)) throw new AppError("Invalid id", { code: "BAD_REQUEST", status: 400 });
+    if (!isUuid(id)) throw new AppError("Not found", { code: "NOT_FOUND", status: 404 });
 
     const p = getPool();
-    const { rows } = await p.query<DbUserRow>(
+
+    const { rowCount } = await p.query(
       `
       update identity.users
       set deleted_at = $2::timestamptz
       where id = $1::uuid
-      returning id, email, display_name, roles, deleted_at
+        and deleted_at is null
       `,
-      [userId, nowIso()]
+      [id, nowIso()]
     );
 
-    const row = rows[0];
-    if (!row) throw new AppError("User not found", { code: "NOT_FOUND", status: 404 });
+    if (!rowCount) {
+      const { rows } = await p.query<{ id: string }>("select id from identity.users where id = $1::uuid limit 1", [id]);
+      if (!rows[0]) {
+        throw new AppError("Not found", { code: "NOT_FOUND", status: 404 });
+      }
+    }
 
-    await revokeSessionsByUserId(userId);
+    await revokeSessionsByUserId(id);
   }
 };
+
