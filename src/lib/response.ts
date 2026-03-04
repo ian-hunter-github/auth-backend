@@ -74,6 +74,18 @@ export function jsonMethodNotAllowed(requestId: string, details?: unknown): Hand
   return jsonError(405, requestId, "BAD_REQUEST", "Method not allowed", details);
 }
 
+export function jsonTooManyRequests(requestId: string, retryAfterSeconds?: number): HandlerResponse {
+  const details = retryAfterSeconds === undefined ? undefined : { retryAfterSeconds };
+  const res = jsonError(429, requestId, "RATE_LIMITED", "Too many requests", details);
+
+  const headers = res.headers || {};
+  if (retryAfterSeconds !== undefined) {
+    headers["retry-after"] = String(retryAfterSeconds);
+  }
+
+  return { ...res, headers };
+}
+
 export function toErrorResponse(requestId: string, err: unknown): HandlerResponse {
   if (isAppError(err)) {
     return jsonError(err.status, requestId, err.code, err.message, err.details);
