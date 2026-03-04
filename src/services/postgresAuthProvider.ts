@@ -98,12 +98,19 @@ function accessTokenForUser(userId: string): string {
   return `${TOKEN_PREFIX}${userId}`;
 }
 
+function isUuid(v: string): boolean {
+  const s = (v || "").trim();
+  if (!s) return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
+}
+
 function parseAccessToken(token: string): string {
   const t = (token || "").trim();
   if (!t) throw new AppError("Missing token", { code: "UNAUTHORIZED", status: 401 });
   if (!t.startsWith(TOKEN_PREFIX)) throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
   const userId = t.slice(TOKEN_PREFIX.length);
   if (!userId) throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
+  if (!isUuid(userId)) throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
   return userId;
 }
 
