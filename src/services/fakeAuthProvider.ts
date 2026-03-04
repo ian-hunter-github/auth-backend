@@ -165,6 +165,24 @@ function requireUserById(userId: string): FakeUser {
   return u;
 }
 
+function toAuthResponse(user: FakeUser, session: { refreshToken: string; expiresAt: string }): AuthLoginResponse {
+  return {
+    provider: "fake",
+    session: {
+      accessToken: accessTokenForUser(user.id),
+      tokenType: "bearer",
+      refreshToken: session.refreshToken,
+      expiresAt: session.expiresAt
+    },
+    user: {
+      id: user.id,
+      username: user.username,
+      displayName: user.displayName,
+      roles: user.roles
+    }
+  };
+}
+
 export const fakeAuthProvider: AuthProvider = {
   login: async (req: AuthLoginRequest): Promise<AuthLoginResponse> => {
     const username = (req.username || "").trim();
@@ -185,24 +203,8 @@ export const fakeAuthProvider: AuthProvider = {
       throw new AppError("Invalid credentials", { code: "UNAUTHORIZED", status: 401 });
     }
 
-    const accessToken = accessTokenForUser(u.id);
-    const { refreshToken, expiresAt } = await createSession(u.id);
-
-    return {
-      provider: "fake",
-      session: {
-        accessToken,
-        tokenType: "bearer",
-        refreshToken,
-        expiresAt
-      },
-      user: {
-        id: u.id,
-        username: u.username,
-        displayName: u.displayName,
-        roles: u.roles
-      }
-    };
+    const s = await createSession(u.id);
+    return toAuthResponse(u, s);
   },
 
   register: async (req: AuthRegisterRequest): Promise<AuthRegisterResponse> => {
@@ -236,29 +238,13 @@ export const fakeAuthProvider: AuthProvider = {
     usersByEmail.set(email, user);
     usersById.set(id, user);
 
-    const accessToken = accessTokenForUser(id);
-    const { refreshToken, expiresAt } = await createSession(id);
-
-    return {
-      provider: "fake",
-      session: {
-        accessToken,
-        tokenType: "bearer",
-        refreshToken,
-        expiresAt
-      },
-      user: {
-        id: user.id,
-        username: user.username,
-        displayName: user.displayName,
-        roles: user.roles
-      }
-    };
+    const s = await createSession(id);
+    return toAuthResponse(user, s);
   },
 
   refresh: async (req: AuthRefreshRequest): Promise<AuthRefreshResponse> => {
-    const rt = (req.refreshToken || "").trim();
-    if (!rt) {
+    const refreshToken = (req.refreshToken || "").trim();
+    if (!refreshToken) {
       throw new AppError("refreshToken is required", {
         code: "BAD_REQUEST",
         status: 400,
@@ -266,10 +252,10 @@ export const fakeAuthProvider: AuthProvider = {
       });
     }
 
-    const parsed = parseRefreshToken(rt);
+    const parsed = parseRefreshToken(refreshToken);
 
     const store = await loadStore();
-    const existing = store.sessionsByRefreshToken[rt];
+    const existing = store.sessionsByRefreshToken[refreshToken];
 
     if (!existing) {
       throw new AppError("Invalid refresh token", { code: "UNAUTHORIZED", status: 401 });
@@ -289,19 +275,25 @@ export const fakeAuthProvider: AuthProvider = {
 
     // Rotate refresh token: revoke old + issue new
     existing.revokedAt = nowIso();
-    store.sessionsByRefreshToken[rt] = existing;
+    store.sessionsByRefreshToken[refreshToken] = existing;
 
-    const { refreshToken, expiresAt } = await createSession(parsed.userId);
-
+    const next = await createSession(parsed.userId);
     await saveStore(store);
 
+    const u = requireUserById(parsed.userId);
     return {
       provider: "fake",
       session: {
-        accessToken: accessTokenForUser(parsed.userId),
+        accessToken: accessTokenForUser(u.id),
         tokenType: "bearer",
-        refreshToken,
-        expiresAt
+        refreshToken: next.refreshToken,
+        expiresAt: next.expiresAt
+      },
+      user: {
+        id: u.id,
+        username: u.username,
+        displayName: u.displayName,
+        roles: u.roles
       }
     };
   },
@@ -311,6 +303,7 @@ export const fakeAuthProvider: AuthProvider = {
     // - If refreshToken provided, revoke that session only
     // - Else, revoke all refresh sessions for this user
     const userId = parseAccessToken(accessToken);
+    requireUserById(userId);
 
     const rt = (req?.refreshToken || "").trim();
 
