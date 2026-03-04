@@ -1,7 +1,12 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import type { SuccessEnvelope, ErrorEnvelope } from "../src/lib/response.js";
 import type { AuthLoginResponse } from "../src/contracts/auth.js";
-import type { AdminUsersResponse } from "../src/contracts/adminUsers.js";
+import type {
+  AdminCreateUserRequest,
+  AdminUpdateUserRequest,
+  AdminUserResponse,
+  AdminUsersResponse
+} from "../src/contracts/adminUsers.js";
 
 let baseUrl = "";
 
@@ -12,7 +17,20 @@ beforeAll(() => {
   }
 });
 
-describe("admin users (GET /admin/users)", () => {
+async function login(username: string, password: string, rid: string) {
+  const res = await fetch(`${baseUrl}/.netlify/functions/auth-login`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-request-id": rid },
+    body: JSON.stringify({ username, password })
+  });
+
+  expect(res.status).toBe(200);
+  const body = (await res.json()) as SuccessEnvelope<AuthLoginResponse>;
+  expect(body.ok).toBe(true);
+  return body.data.session.accessToken;
+}
+
+describe("admin users (/.netlify/functions/admin-users)", () => {
   it("requires auth", async () => {
     const res = await fetch(`${baseUrl}/.netlify/functions/admin-users`, {
       headers: { "x-request-id": "admin-users-401" }
@@ -23,63 +41,117 @@ describe("admin users (GET /admin/users)", () => {
     expect(body.ok).toBe(false);
   });
 
-  it("allows admin allowlist and forbids non-admin", async () => {
-    // demo is allowlisted as admin via test/globalSetup.ts (ADMIN_USER_EMAILS=demo)
-    const loginRes = await fetch(`${baseUrl}/.netlify/functions/auth-login`, {
+  it("admin can list users and get by id", async () => {
+    const adminAccess = await login("demo", "letmein", "admin-users-login-demo");
+
+    const listRes = await fetch(`${baseUrl}/.netlify/functions/admin-users`, {
+      headers: { authorization: `Bearer ${adminAccess}`, "x-request-id": "admin-users-list-200" }
+    });
+
+    expect(listRes.status).toBe(200);
+    const listBody = (await listRes.json()) as SuccessEnvelope<AdminUsersResponse>;
+    expect(listBody.ok).toBe(true);
+    expect(Array.isArray(listBody.data.users)).toBe(true);
+    expect(listBody.data.users.length).toBeGreaterThan(0);
+
+    const first = listBody.data.users[0]!;
+    expect(typeof first.id).toBe("string");
+
+    const getRes = await fetch(`${baseUrl}/.netlify/functions/admin-users/${first.id}`, {
+      headers: { authorization: `Bearer ${adminAccess}`, "x-request-id": "admin-users-get-200" }
+    });
+
+    expect(getRes.status).toBe(200);
+    const getBody = (await getRes.json()) as SuccessEnvelope<AdminUserResponse>;
+    expect(getBody.ok).toBe(true);
+    expect(getBody.data.user.id).toBe(first.id);
+  });
+
+  it("admin can create and patch users; non-admin forbidden", async () => {
+    const adminAccess = await login("demo", "letmein", "admin-users-login-admin");
+    const userAccess = await login("user@example.com", "letmein", "admin-users-login-user");
+
+    const forbiddenRes = await fetch(`${baseUrl}/.netlify/functions/admin-users`, {
       method: "POST",
       headers: {
+        authorization: `Bearer ${userAccess}`,
         "content-type": "application/json",
-        "x-request-id": "admin-users-login-demo"
+        "x-request-id": "admin-users-nonadmin-403"
       },
-      body: JSON.stringify({ username: "demo", password: "letmein" })
+      body: JSON.stringify({ email: "x@example.com", password: "letmein" } satisfies AdminCreateUserRequest)
     });
 
-    expect(loginRes.status).toBe(200);
-    const loginBody = (await loginRes.json()) as SuccessEnvelope<AuthLoginResponse>;
-    expect(loginBody.ok).toBe(true);
+    expect(forbiddenRes.status).toBe(403);
+    const forbiddenBody = (await forbiddenRes.json()) as ErrorEnvelope;
+    expect(forbiddenBody.ok).toBe(false);
+    expect(forbiddenBody.error.code).toBe("FORBIDDEN");
 
-    const demoAccess = loginBody.data.session.accessToken;
-
-    const okRes = await fetch(`${baseUrl}/.netlify/functions/admin-users`, {
-      headers: {
-        authorization: `Bearer ${demoAccess}`,
-        "x-request-id": "admin-users-200"
-      }
-    });
-
-    expect(okRes.status).toBe(200);
-    const okBody = (await okRes.json()) as SuccessEnvelope<AdminUsersResponse>;
-    expect(okBody.ok).toBe(true);
-    expect(Array.isArray(okBody.data.users)).toBe(true);
-    expect(okBody.data.users.length).toBeGreaterThan(0);
-
-    // Login as a seeded non-admin user. (Avoid registering a user, since fake provider
-    // user storage is in-memory and Netlify dev may reload modules between requests.)
-    const otherLoginRes = await fetch(`${baseUrl}/.netlify/functions/auth-login`, {
+    const badReqRes = await fetch(`${baseUrl}/.netlify/functions/admin-users`, {
       method: "POST",
       headers: {
+        authorization: `Bearer ${adminAccess}`,
         "content-type": "application/json",
-        "x-request-id": "admin-users-login-other"
+        "x-request-id": "admin-users-create-400"
       },
-      body: JSON.stringify({ username: "user@example.com", password: "letmein" })
+      body: JSON.stringify({ email: "", password: "" } satisfies AdminCreateUserRequest)
     });
 
-    expect(otherLoginRes.status).toBe(200);
-    const otherLoginBody = (await otherLoginRes.json()) as SuccessEnvelope<AuthLoginResponse>;
-    expect(otherLoginBody.ok).toBe(true);
+    expect(badReqRes.status).toBe(400);
 
-    const otherAccess = otherLoginBody.data.session.accessToken;
-
-    const otherRes = await fetch(`${baseUrl}/.netlify/functions/admin-users`, {
+    const createRes = await fetch(`${baseUrl}/.netlify/functions/admin-users`, {
+      method: "POST",
       headers: {
-        authorization: `Bearer ${otherAccess}`,
-        "x-request-id": "admin-users-other-403"
-      }
+        authorization: `Bearer ${adminAccess}`,
+        "content-type": "application/json",
+        "x-request-id": "admin-users-create-201"
+      },
+      body: JSON.stringify({
+        email: "new-admin-created@example.com",
+        password: "letmein",
+        displayName: "Created User",
+        roles: ["user"]
+      } satisfies AdminCreateUserRequest)
     });
 
-    expect(otherRes.status).toBe(403);
-    const otherBody = (await otherRes.json()) as ErrorEnvelope;
-    expect(otherBody.ok).toBe(false);
-    expect(otherBody.error.code).toBe("FORBIDDEN");
+    expect(createRes.status).toBe(201);
+    const createBody = (await createRes.json()) as SuccessEnvelope<AdminUserResponse>;
+    expect(createBody.ok).toBe(true);
+    expect(createBody.data.user.username).toBe("new-admin-created@example.com");
+    expect(createBody.data.user.roles).toContain("user");
+
+    const conflictRes = await fetch(`${baseUrl}/.netlify/functions/admin-users`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${adminAccess}`,
+        "content-type": "application/json",
+        "x-request-id": "admin-users-create-409"
+      },
+      body: JSON.stringify({
+        email: "new-admin-created@example.com",
+        password: "letmein"
+      } satisfies AdminCreateUserRequest)
+    });
+
+    expect(conflictRes.status).toBe(409);
+
+    const patchRes = await fetch(`${baseUrl}/.netlify/functions/admin-users/${createBody.data.user.id}`, {
+      method: "PATCH",
+      headers: {
+        authorization: `Bearer ${adminAccess}`,
+        "content-type": "application/json",
+        "x-request-id": "admin-users-patch-200"
+      },
+      body: JSON.stringify({
+        displayName: "Updated Name",
+        roles: ["admin", "user"]
+      } satisfies AdminUpdateUserRequest)
+    });
+
+    expect(patchRes.status).toBe(200);
+    const patchBody = (await patchRes.json()) as SuccessEnvelope<AdminUserResponse>;
+    expect(patchBody.ok).toBe(true);
+    expect(patchBody.data.user.displayName).toBe("Updated Name");
+    expect(patchBody.data.user.roles).toContain("admin");
   });
 });
+

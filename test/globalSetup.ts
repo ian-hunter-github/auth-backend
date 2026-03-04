@@ -3,7 +3,6 @@ import { startNetlifyDev } from "./netlifyDevHarness.js";
 type Harness = Awaited<ReturnType<typeof startNetlifyDev>>;
 
 declare global {
-  // eslint-disable-next-line no-var
   var __NETLIFY_DEV_HARNESS__: Harness | undefined;
 }
 

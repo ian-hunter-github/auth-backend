@@ -1,17 +1,66 @@
 import type { Handler } from "@netlify/functions";
 import { getOrCreateRequestId } from "../../src/lib/requestId.js";
+import { parseJsonBody } from "../../src/lib/body.js";
 import { jsonOk, requireMethod, toErrorResponse } from "../../src/lib/response.js";
 import { getBearerToken } from "../../src/lib/authHeader.js";
-import { getAdminUsers } from "../../src/services/adminUsersService.js";
+import type { AdminCreateUserRequest, AdminUpdateUserRequest } from "../../src/contracts/adminUsers.js";
+import {
+  createAdminUser,
+  getAdminUserById,
+  getAdminUsers,
+  updateAdminUser
+} from "../../src/services/adminUsersService.js";
+
+function getIdFromPath(pathname: string | undefined): string | undefined {
+  const p = (pathname || "").trim();
+  if (!p) return undefined;
+
+  const marker = "/.netlify/functions/admin-users";
+  const i = p.indexOf(marker);
+  if (i < 0) return undefined;
+
+  const rest = p.slice(i + marker.length);
+  const seg = rest.startsWith("/") ? rest.slice(1) : rest;
+  const id = seg.split("/")[0];
+  return id && id.trim().length > 0 ? id.trim() : undefined;
+}
 
 export const handler: Handler = async (event) => {
   const requestId = getOrCreateRequestId(event.headers || {});
   try {
-    requireMethod(event.httpMethod, ["GET"]);
+    requireMethod(event.httpMethod, ["GET", "POST", "PATCH"]);
+
     const token = getBearerToken(event.headers || {});
-    const data = await getAdminUsers(token);
+    const id = getIdFromPath(event.path);
+
+    if (event.httpMethod === "GET") {
+      if (id) {
+        const data = await getAdminUserById(token, id);
+        return jsonOk(200, requestId, data);
+      }
+      const data = await getAdminUsers(token);
+      return jsonOk(200, requestId, data);
+    }
+
+    if (event.httpMethod === "POST") {
+      if (id) {
+        // POST to /admin-users/:id is not supported
+        return jsonOk(405, requestId, { message: "Method not allowed" });
+      }
+      const req = parseJsonBody<AdminCreateUserRequest>(event.body);
+      const data = await createAdminUser(token, req);
+      return jsonOk(201, requestId, data);
+    }
+
+    // PATCH
+    if (!id) {
+      return jsonOk(400, requestId, { message: "Missing user id" });
+    }
+    const req = parseJsonBody<AdminUpdateUserRequest>(event.body);
+    const data = await updateAdminUser(token, id, req);
     return jsonOk(200, requestId, data);
   } catch (err) {
     return toErrorResponse(requestId, err);
   }
 };
+

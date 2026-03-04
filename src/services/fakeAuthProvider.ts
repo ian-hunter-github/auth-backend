@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { promises as fs } from "node:fs";
 import { AppError } from "../lib/errors.js";
-import type { AuthProvider } from "./authProvider.js";
+import type { AuthProvider, CreateUserInput, UpdateUserInput } from "./authProvider.js";
 import type {
   AuthLoginRequest,
   AuthLoginResponse,
@@ -161,7 +161,7 @@ function requireUserByEmail(email: string): FakeUser {
 
 function requireUserById(userId: string): FakeUser {
   const u = usersById.get(userId);
-  if (!u) throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
+  if (!u) throw new AppError("Not found", { code: "NOT_FOUND", status: 404 });
   return u;
 }
 
@@ -181,6 +181,12 @@ function toAuthResponse(user: FakeUser, session: { refreshToken: string; expires
       roles: user.roles
     }
   };
+}
+
+function normalizeRoles(roles: string[] | undefined): string[] {
+  const r = Array.isArray(roles) ? roles.map((x) => (x || "").trim()).filter((x) => x.length > 0) : [];
+  const unique = Array.from(new Set(r));
+  return unique.length > 0 ? unique : ["user"];
 }
 
 export const fakeAuthProvider: AuthProvider = {
@@ -355,5 +361,77 @@ export const fakeAuthProvider: AuthProvider = {
       displayName: u.displayName,
       roles: u.roles
     }));
+  },
+
+  getUserById: async (id: string): Promise<AuthUserProfile> => {
+    const u = requireUserById(id);
+    return {
+      id: u.id,
+      username: u.username,
+      displayName: u.displayName,
+      roles: u.roles
+    };
+  },
+
+  createUser: async (input: CreateUserInput): Promise<AuthUserProfile> => {
+    const email = (input.email || "").trim().toLowerCase();
+    const password = input.password || "";
+    const displayName = (input.displayName || "").trim();
+    const roles = normalizeRoles(input.roles);
+
+    if (!email || !password) {
+      throw new AppError("email and password are required", {
+        code: "BAD_REQUEST",
+        status: 400,
+        details: { fields: ["email", "password"] }
+      });
+    }
+
+    if (usersByEmail.has(email)) {
+      throw new AppError("Email already exists", { code: "CONFLICT", status: 409 });
+    }
+
+    const id = `user_${crypto.randomBytes(6).toString("hex")}`;
+
+    const user: FakeUser = {
+      id,
+      username: email,
+      displayName: displayName || email,
+      roles,
+      email,
+      password
+    };
+
+    usersByEmail.set(email, user);
+    usersById.set(id, user);
+
+    return {
+      id: user.id,
+      username: user.username,
+      displayName: user.displayName,
+      roles: user.roles
+    };
+  },
+
+  updateUser: async (id: string, input: UpdateUserInput): Promise<AuthUserProfile> => {
+    const u = requireUserById(id);
+
+    if (input.displayName !== undefined) {
+      u.displayName = (input.displayName || "").trim();
+    }
+    if (input.roles !== undefined) {
+      u.roles = normalizeRoles(input.roles);
+    }
+
+    usersById.set(u.id, u);
+    usersByEmail.set(u.email, u);
+
+    return {
+      id: u.id,
+      username: u.username,
+      displayName: u.displayName,
+      roles: u.roles
+    };
   }
 };
+

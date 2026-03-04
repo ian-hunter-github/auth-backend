@@ -8,7 +8,7 @@ import type {
   AuthRegisterResponse,
   AuthUserProfile
 } from "../contracts/auth.js";
-import type { AuthProvider } from "./authProvider.js";
+import type { AuthProvider, CreateUserInput, UpdateUserInput } from "./authProvider.js";
 import { fakeAuthProvider } from "./fakeAuthProvider.js";
 import { postgresAuthProvider } from "./postgresAuthProvider.js";
 
@@ -55,3 +55,16 @@ export async function getUserFromToken(token: string): Promise<AuthUserProfile> 
 export async function listUsers(): Promise<AuthUserProfile[]> {
   return selectProvider().listUsers();
 }
+
+export async function getUserById(id: string): Promise<AuthUserProfile> {
+  return selectProvider().getUserById(id);
+}
+
+export async function createUser(input: CreateUserInput): Promise<AuthUserProfile> {
+  return selectProvider().createUser(input);
+}
+
+export async function updateUser(id: string, input: UpdateUserInput): Promise<AuthUserProfile> {
+  return selectProvider().updateUser(id, input);
+}
+

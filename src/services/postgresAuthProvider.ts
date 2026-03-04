@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import pg from "pg";
 import { AppError } from "../lib/errors.js";
 import { getEnv, requireEnv } from "../lib/env.js";
-import type { AuthProvider } from "./authProvider.js";
+import type { AuthProvider, CreateUserInput, UpdateUserInput } from "./authProvider.js";
 import type {
   AuthLoginRequest,
   AuthLoginResponse,
@@ -156,6 +156,12 @@ function hashPassword(salt: string, password: string): string {
   // Must match DB seeding formula:
   // encode(digest(convert_to(password_salt || password_plain,'utf8'),'sha256'),'hex')
   return sha256Hex(`${salt}${password}`);
+}
+
+function normalizeRoles(roles: string[] | undefined): string[] {
+  const r = Array.isArray(roles) ? roles.map((x) => (x || "").trim()).filter((x) => x.length > 0) : [];
+  const unique = Array.from(new Set(r));
+  return unique.length > 0 ? unique : ["user"];
 }
 
 export const postgresAuthProvider: AuthProvider = {
@@ -355,6 +361,93 @@ export const postgresAuthProvider: AuthProvider = {
     );
 
     return rows.map((r) => toProfile(r));
+  },
+
+  getUserById: async (id: string): Promise<AuthUserProfile> => {
+    const p = getPool();
+    const { rows } = await p.query<DbUserRow>(
+      "select id, email, display_name, roles from identity.users where id = $1::uuid limit 1",
+      [id]
+    );
+
+    const row = rows[0];
+    if (!row) {
+      throw new AppError("Not found", { code: "NOT_FOUND", status: 404 });
+    }
+
+    return toProfile(row);
+  },
+
+  createUser: async (input: CreateUserInput): Promise<AuthUserProfile> => {
+    const email = (input.email || "").trim().toLowerCase();
+    const password = input.password || "";
+    const displayName = (input.displayName || "").trim();
+    const roles = normalizeRoles(input.roles);
+
+    if (!email || !password) {
+      throw new AppError("email and password are required", {
+        code: "BAD_REQUEST",
+        status: 400,
+        details: { fields: ["email", "password"] }
+      });
+    }
+
+    const p = getPool();
+    const { rows: existing } = await p.query<{ id: string }>(
+      "select id from identity.users where email = $1 limit 1",
+      [email]
+    );
+    if (existing[0]) {
+      throw new AppError("Email already exists", { code: "CONFLICT", status: 409 });
+    }
+
+    const salt = randomHex(16);
+    const hash = hashPassword(salt, password);
+
+    const { rows } = await p.query<DbUserRow>(
+      `
+      insert into identity.users (email, display_name, roles, password_salt, password_hash)
+      values ($1, $2, $3, $4, $5)
+      returning id, email, display_name, roles
+      `,
+      [email, displayName || email, roles, salt, hash]
+    );
+
+    const row = rows[0];
+    if (!row) throw new AppError("Failed to create user", { code: "INTERNAL_ERROR", status: 500 });
+    return toProfile(row);
+  },
+
+  updateUser: async (id: string, input: UpdateUserInput): Promise<AuthUserProfile> => {
+    const hasDisplayName = input.displayName !== undefined;
+    const hasRoles = input.roles !== undefined;
+
+    if (!hasDisplayName && !hasRoles) {
+      throw new AppError("At least one field must be provided", { code: "BAD_REQUEST", status: 400 });
+    }
+
+    const displayName = hasDisplayName ? (input.displayName || "").trim() : undefined;
+    const roles = hasRoles ? normalizeRoles(input.roles) : undefined;
+
+    const p = getPool();
+    const { rows } = await p.query<DbUserRow>(
+      `
+      update identity.users
+      set
+        display_name = case when $2::boolean then $3 else display_name end,
+        roles = case when $4::boolean then $5::text[] else roles end
+      where id = $1::uuid
+      returning id, email, display_name, roles
+      `,
+      [id, hasDisplayName, displayName, hasRoles, roles]
+    );
+
+    const row = rows[0];
+    if (!row) {
+      throw new AppError("Not found", { code: "NOT_FOUND", status: 404 });
+    }
+
+    return toProfile(row);
   }
 };
 
