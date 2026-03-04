@@ -17,6 +17,10 @@ beforeAll(() => {
   }
 });
 
+function uniqueEmail(tag: string): string {
+  return `test+${tag}+${Date.now()}@example.com`;
+}
+
 async function login(username: string, password: string, rid: string) {
   const res = await fetch(`${baseUrl}/.netlify/functions/auth-login`, {
     method: "POST",
@@ -103,6 +107,8 @@ describe("admin users (/.netlify/functions/admin-users)", () => {
 
     expect(badReqRes.status).toBe(400);
 
+    const email = uniqueEmail("admin-create");
+
     const createRes = await fetch(`${baseUrl}/.netlify/functions/admin-users`, {
       method: "POST",
       headers: {
@@ -111,7 +117,7 @@ describe("admin users (/.netlify/functions/admin-users)", () => {
         "x-request-id": "admin-users-create-201"
       },
       body: JSON.stringify({
-        email: "new-admin-created@example.com",
+        email,
         password: "letmein",
         displayName: "Created User",
         roles: ["user"]
@@ -121,7 +127,7 @@ describe("admin users (/.netlify/functions/admin-users)", () => {
     expect(createRes.status).toBe(201);
     const createBody = (await createRes.json()) as SuccessEnvelope<AdminUserResponse>;
     expect(createBody.ok).toBe(true);
-    expect(createBody.data.user.username).toBe("new-admin-created@example.com");
+    expect(createBody.data.user.username).toBe(email);
     expect(createBody.data.user.roles).toContain("user");
 
     const conflictRes = await fetch(`${baseUrl}/.netlify/functions/admin-users`, {
@@ -132,7 +138,7 @@ describe("admin users (/.netlify/functions/admin-users)", () => {
         "x-request-id": "admin-users-create-409"
       },
       body: JSON.stringify({
-        email: "new-admin-created@example.com",
+        email,
         password: "letmein"
       } satisfies AdminCreateUserRequest)
     });
@@ -162,6 +168,8 @@ describe("admin users (/.netlify/functions/admin-users)", () => {
   it("admin can soft delete users; deleted user cannot login or refresh", async () => {
     const adminAccess = (await loginOk("demo", "letmein", "admin-users-login-admin-2")).session.accessToken;
 
+    const email = uniqueEmail("to-delete");
+
     const createRes = await fetch(`${baseUrl}/.netlify/functions/admin-users`, {
       method: "POST",
       headers: {
@@ -170,7 +178,7 @@ describe("admin users (/.netlify/functions/admin-users)", () => {
         "x-request-id": "admin-users-create-softdel-201"
       },
       body: JSON.stringify({
-        email: "to-delete@example.com",
+        email,
         password: "letmein",
         displayName: "To Delete",
         roles: ["user"]
@@ -181,7 +189,7 @@ describe("admin users (/.netlify/functions/admin-users)", () => {
     const createBody = (await createRes.json()) as SuccessEnvelope<AdminUserResponse>;
     expect(createBody.ok).toBe(true);
 
-    const loginBody = await loginOk("to-delete@example.com", "letmein", "admin-users-login-todelete");
+    const loginBody = await loginOk(email, "letmein", "admin-users-login-todelete");
     const refreshToken = loginBody.session.refreshToken;
 
     const delRes = await fetch(`${baseUrl}/.netlify/functions/admin-users/${createBody.data.user.id}`, {
@@ -191,7 +199,7 @@ describe("admin users (/.netlify/functions/admin-users)", () => {
 
     expect(delRes.status).toBe(204);
 
-    const loginAfterRes = await login("to-delete@example.com", "letmein", "admin-users-login-todelete-after");
+    const loginAfterRes = await login(email, "letmein", "admin-users-login-todelete-after");
     expect(loginAfterRes.status).toBe(401);
 
     const refreshAfterRes = await fetch(`${baseUrl}/.netlify/functions/auth-refresh`, {

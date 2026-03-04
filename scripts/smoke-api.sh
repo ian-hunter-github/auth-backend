@@ -71,27 +71,37 @@ request_json() {
 
   if [[ -n "$data" ]]; then
     if [[ -n "$auth_header" ]]; then
-      out_code="$(curl -sS -o "$tmp_body" -w "%{http_code}" -X "$method" \
-        -H "content-type: application/json" -H "accept: application/json" \
-        -H "authorization: $auth_header" \
-        --data "$data" \
-        "$url_fn" || true)"
+      out_code="$(
+        curl -sS -o "$tmp_body" -w "%{http_code}" \
+          -X "$method" "$url_fn" \
+          -H "content-type: application/json" \
+          -H "accept: application/json" \
+          -H "authorization: $auth_header" \
+          --data "$data" || true
+      )"
     else
-      out_code="$(curl -sS -o "$tmp_body" -w "%{http_code}" -X "$method" \
-        -H "content-type: application/json" -H "accept: application/json" \
-        --data "$data" \
-        "$url_fn" || true)"
+      out_code="$(
+        curl -sS -o "$tmp_body" -w "%{http_code}" \
+          -X "$method" "$url_fn" \
+          -H "content-type: application/json" \
+          -H "accept: application/json" \
+          --data "$data" || true
+      )"
     fi
   else
     if [[ -n "$auth_header" ]]; then
-      out_code="$(curl -sS -o "$tmp_body" -w "%{http_code}" -X "$method" \
-        -H "accept: application/json" \
-        -H "authorization: $auth_header" \
-        "$url_fn" || true)"
+      out_code="$(
+        curl -sS -o "$tmp_body" -w "%{http_code}" \
+          -X "$method" "$url_fn" \
+          -H "accept: application/json" \
+          -H "authorization: $auth_header" || true
+      )"
     else
-      out_code="$(curl -sS -o "$tmp_body" -w "%{http_code}" -X "$method" \
-        -H "accept: application/json" \
-        "$url_fn" || true)"
+      out_code="$(
+        curl -sS -o "$tmp_body" -w "%{http_code}" \
+          -X "$method" "$url_fn" \
+          -H "accept: application/json" || true
+      )"
     fi
   fi
 
@@ -190,18 +200,11 @@ echo "1) POST /auth-login"
 last_code=""
 last_url=""
 last_body=""
-
 for pair in "${candidates[@]}"; do
-  u="${pair%%|*}"
-  p="${pair##*|}"
+  username="${pair%%|*}"
+  password="${pair#*|}"
 
-  # Skip wrong-password pair for positive login attempts.
-  if [[ "$p" == "wrong-password" ]]; then
-    continue
-  fi
-
-  payload="$(make_login_payload "$u" "$p")"
-
+  payload="$(make_login_payload "$username" "$password")"
   resp="$(request_json "POST" "/auth-login" "/.netlify/functions/auth-login" "$payload")"
   url="$(printf '%s' "$resp" | sed -n '1p')"
   code="$(printf '%s' "$resp" | sed -n '2p')"
@@ -215,91 +218,106 @@ for pair in "${candidates[@]}"; do
     login_code="$code"
     login_url="$url"
     login_body="$body"
-    used_username="$u"
+    used_username="$username"
     break
   fi
 done
 
-if [[ "$login_code" != "200" ]]; then
-  echo "ERROR: login failed (last attempt: ${last_code:-<none>}) at ${last_url:-<none>}" >&2
-  echo "${last_body:-<no body>}" >&2
-  echo "" >&2
-  echo "Tried credential pairs:" >&2
-  for pair in "${candidates[@]}"; do
-    if [[ "${pair##*|}" == "wrong-password" ]]; then
-      continue
-    fi
-    echo "  - ${pair%%|*} / ${pair##*|}" >&2
-  done
+if [[ -z "$login_code" ]]; then
+  echo "ERROR: no credential pair succeeded (last code=$last_code) at $last_url" >&2
+  echo "$last_body" >&2
   exit 1
 fi
 
 provider="$(printf '%s' "$login_body" | node_json_get_first "provider" "data.provider")"
 access_token="$(printf '%s' "$login_body" | node_json_get_first "session.accessToken" "data.session.accessToken")"
-token_type="$(printf '%s' "$login_body" | node_json_get_first "session.tokenType" "data.session.tokenType")"
+refresh_token="$(printf '%s' "$login_body" | node_json_get_first "session.refreshToken" "data.session.refreshToken")"
 user_id="$(printf '%s' "$login_body" | node_json_get_first "user.id" "data.user.id")"
 
 if [[ -z "$provider" ]]; then
-  provider="<unknown>"
+  echo "ERROR: missing provider in /auth-login response" >&2
+  echo "$login_body" >&2
+  exit 1
 fi
 
 if [[ -z "$access_token" ]]; then
-  echo "ERROR: missing session.accessToken" >&2
+  echo "ERROR: missing accessToken in /auth-login response" >&2
   echo "$login_body" >&2
   exit 1
 fi
 
-if [[ -z "$token_type" ]]; then
-  token_type="Bearer"
+if [[ -z "$refresh_token" ]]; then
+  echo "ERROR: missing refreshToken in /auth-login response" >&2
+  echo "$login_body" >&2
+  exit 1
 fi
 
 if [[ -z "$user_id" ]]; then
-  echo "ERROR: missing user.id" >&2
+  echo "ERROR: missing user.id in /auth-login response" >&2
   echo "$login_body" >&2
   exit 1
 fi
 
-echo "OK: login succeeded as '${used_username}' via ${login_url}"
+echo "OK: login succeeded (provider=$provider, username=$used_username)"
 
-auth_header="${token_type} ${access_token}"
+auth_header="Bearer ${access_token}"
 
-# 2) Negative: /me missing header
-echo "2) Negative: GET /me rejects missing Authorization header"
+# 2) Negative: /me without auth should be 401
+echo "2) Negative: GET /me without auth"
 me0_resp="$(request_json "GET" "/me" "/.netlify/functions/me")"
 me0_code="$(printf '%s' "$me0_resp" | sed -n '2p')"
 me0_body="$(printf '%s' "$me0_resp" | sed -n '3,$p')"
 if [[ "$me0_code" != "401" ]]; then
-  echo "ERROR: /me missing auth: expected 401 but got $me0_code" >&2
+  echo "ERROR: /me without auth: expected 401 but got $me0_code" >&2
   echo "$me0_body" >&2
   exit 1
 fi
-echo "OK: /me missing auth rejected"
+echo "OK: /me without auth rejected"
 
-# 3) Negative: /me bogus token
-echo "3) Negative: GET /me rejects invalid token"
-me1_resp="$(request_json "GET" "/me" "/.netlify/functions/me" "" "Bearer bogus-token")"
-me1_code="$(printf '%s' "$me1_resp" | sed -n '2p')"
-me1_body="$(printf '%s' "$me1_resp" | sed -n '3,$p')"
-if [[ "$me1_code" != "401" ]]; then
-  echo "ERROR: /me invalid token: expected 401 but got $me1_code" >&2
-  echo "$me1_body" >&2
+# 3) Positive: /auth-refresh rotates refresh token and returns new access token
+echo "3) POST /auth-refresh"
+refresh_payload="$(node -e 'const rt=process.argv[1]; process.stdout.write(JSON.stringify({ refreshToken: rt }));' "$refresh_token")"
+refresh_resp="$(request_json "POST" "/auth-refresh" "/.netlify/functions/auth-refresh" "$refresh_payload")"
+refresh_url="$(printf '%s' "$refresh_resp" | sed -n '1p')"
+refresh_code="$(printf '%s' "$refresh_resp" | sed -n '2p')"
+refresh_body="$(printf '%s' "$refresh_resp" | sed -n '3,$p')"
+
+if [[ "$refresh_code" != "200" ]]; then
+  echo "ERROR: /auth-refresh failed (${refresh_code}) at ${refresh_url}" >&2
+  echo "$refresh_body" >&2
   exit 1
 fi
-echo "OK: /me invalid token rejected"
 
-# 4) Negative: /me tampered token (one character changed)
-echo "4) Negative: GET /me rejects tampered token"
-tampered="$access_token"
-if [[ "${#tampered}" -gt 10 ]]; then
-  # flip last character deterministically
-  last="${tampered: -1}"
-  repl="a"
-  if [[ "$last" == "a" ]]; then
-    repl="b"
-  fi
-  tampered="${tampered:0:${#tampered}-1}${repl}"
+new_access_token="$(printf '%s' "$refresh_body" | node_json_get_first "session.accessToken" "data.session.accessToken")"
+new_refresh_token="$(printf '%s' "$refresh_body" | node_json_get_first "session.refreshToken" "data.session.refreshToken")"
+if [[ -z "$new_access_token" || -z "$new_refresh_token" ]]; then
+  echo "ERROR: /auth-refresh missing tokens" >&2
+  echo "$refresh_body" >&2
+  exit 1
 fi
+echo "OK: refresh succeeded"
 
+# 4) Negative: old refresh token should now be rejected (401)
+echo "4) Negative: old refresh token rejected"
+old_refresh_payload="$(node -e 'const rt=process.argv[1]; process.stdout.write(JSON.stringify({ refreshToken: rt }));' "$refresh_token")"
+old_refresh_resp="$(request_json "POST" "/auth-refresh" "/.netlify/functions/auth-refresh" "$old_refresh_payload")"
+old_refresh_code="$(printf '%s' "$old_refresh_resp" | sed -n '2p')"
+old_refresh_body="$(printf '%s' "$old_refresh_resp" | sed -n '3,$p')"
+if [[ "$old_refresh_code" != "401" ]]; then
+  echo "ERROR: old refresh token: expected 401 but got $old_refresh_code" >&2
+  echo "$old_refresh_body" >&2
+  exit 1
+fi
+echo "OK: old refresh token rejected"
+
+# Update current tokens after refresh.
+access_token="$new_access_token"
+refresh_token="$new_refresh_token"
+auth_header="Bearer ${access_token}"
+
+# 4.1) /me with tampered token should be rejected (401)
+echo "4.1) Negative: GET /me with tampered token rejected"
+tampered="${access_token}x"
 me2_resp="$(request_json "GET" "/me" "/.netlify/functions/me" "" "Bearer ${tampered}")"
 me2_code="$(printf '%s' "$me2_resp" | sed -n '2p')"
 me2_body="$(printf '%s' "$me2_resp" | sed -n '3,$p')"
@@ -336,5 +354,117 @@ if [[ "$me_user_id" != "$user_id" ]]; then
   exit 1
 fi
 
+
+# 6) Phase 3: admin users (read-only smoke)
+#
+# This is intentionally non-destructive by default so it is safe to run against production.
+# If you want to exercise create/patch/delete flows in dev, set:
+#   SMOKE_ADMIN_MUTATION=1
+
+SMOKE_ADMIN_MUTATION="${SMOKE_ADMIN_MUTATION:-0}"
+
+admin_list_resp="$(request_json "GET" "/admin/users" "/.netlify/functions/admin-users" "" "$auth_header")"
+admin_list_url="$(printf '%s' "$admin_list_resp" | sed -n '1p')"
+admin_list_code="$(printf '%s' "$admin_list_resp" | sed -n '2p')"
+admin_list_body="$(printf '%s' "$admin_list_resp" | sed -n '3,$p')"
+
+if [[ "$admin_list_code" == "404" ]]; then
+  echo "OK: /admin/users not deployed; skipping Phase 3 admin smoke"
+elif [[ "$admin_list_code" == "403" || "$admin_list_code" == "401" ]]; then
+  # If postgres + demo@example.com is not admin, that's a misconfig for Phase 3.
+  if [[ "$provider" == "postgres" && "$used_username" == "demo@example.com" ]]; then
+    echo "ERROR: expected demo@example.com to be admin, but /admin/users returned $admin_list_code" >&2
+    echo "Request: $admin_list_url" >&2
+    echo "$admin_list_body" >&2
+    exit 1
+  fi
+  echo "OK: /admin/users forbidden for this user (code=${admin_list_code}); skipping admin checks"
+elif [[ "$admin_list_code" != "200" ]]; then
+  echo "ERROR: /admin/users failed (${admin_list_code}) at ${admin_list_url}" >&2
+  echo "$admin_list_body" >&2
+  exit 1
+else
+  echo "OK: /admin/users list OK"
+
+  admin_first_user_id="$(printf '%s' "$admin_list_body" | node_json_get_first "data.users.0.id" "users.0.id")"
+  if [[ -z "$admin_first_user_id" ]]; then
+    echo "ERROR: /admin/users missing first user id" >&2
+    echo "$admin_list_body" >&2
+    exit 1
+  fi
+
+  echo "6.1) GET /admin/users/{id}"
+  admin_get_resp="$(request_json "GET" "/admin/users/${admin_first_user_id}" "/.netlify/functions/admin-users/${admin_first_user_id}" "" "$auth_header")"
+  admin_get_url="$(printf '%s' "$admin_get_resp" | sed -n '1p')"
+  admin_get_code="$(printf '%s' "$admin_get_resp" | sed -n '2p')"
+  admin_get_body="$(printf '%s' "$admin_get_resp" | sed -n '3,$p')"
+
+  if [[ "$admin_get_code" != "200" ]]; then
+    echo "ERROR: /admin/users/{id} failed (${admin_get_code}) at ${admin_get_url}" >&2
+    echo "$admin_get_body" >&2
+    exit 1
+  fi
+
+  admin_get_user_id="$(printf '%s' "$admin_get_body" | node_json_get_first "data.user.id" "user.id")"
+  if [[ "$admin_get_user_id" != "$admin_first_user_id" ]]; then
+    echo "ERROR: /admin/users/{id} user.id mismatch: expected '$admin_first_user_id' but got '$admin_get_user_id'" >&2
+    echo "$admin_get_body" >&2
+    exit 1
+  fi
+
+  echo "OK: /admin/users/{id} OK"
+
+  if [[ "$SMOKE_ADMIN_MUTATION" == "1" ]]; then
+    echo "6.2) POST /admin/users (dev-only mutation smoke)"
+
+    new_email="smoke+$(date +%s)@example.com"
+    create_payload="$(node -e 'const email=process.argv[1]; process.stdout.write(JSON.stringify({ email, password: "letmein", displayName: "Smoke User" }));' "$new_email")"
+
+    create_resp="$(request_json "POST" "/admin/users" "/.netlify/functions/admin-users" "$create_payload" "$auth_header")"
+    create_url="$(printf '%s' "$create_resp" | sed -n '1p')"
+    create_code="$(printf '%s' "$create_resp" | sed -n '2p')"
+    create_body="$(printf '%s' "$create_resp" | sed -n '3,$p')"
+
+    if [[ "$create_code" != "201" ]]; then
+      echo "ERROR: /admin/users create failed (${create_code}) at ${create_url}" >&2
+      echo "$create_body" >&2
+      exit 1
+    fi
+
+    created_user_id="$(printf '%s' "$create_body" | node_json_get_first "data.user.id" "user.id")"
+    if [[ -z "$created_user_id" ]]; then
+      echo "ERROR: /admin/users create missing user.id" >&2
+      echo "$create_body" >&2
+      exit 1
+    fi
+
+    echo "6.3) DELETE /admin/users/{id} (soft delete)"
+    del_resp="$(request_json "DELETE" "/admin/users/${created_user_id}" "/.netlify/functions/admin-users/${created_user_id}" "" "$auth_header")"
+    del_url="$(printf '%s' "$del_resp" | sed -n '1p')"
+    del_code="$(printf '%s' "$del_resp" | sed -n '2p')"
+    del_body="$(printf '%s' "$del_resp" | sed -n '3,$p')"
+
+    if [[ "$del_code" != "200" ]]; then
+      echo "ERROR: /admin/users delete failed (${del_code}) at ${del_url}" >&2
+      echo "$del_body" >&2
+      exit 1
+    fi
+
+    echo "6.4) Negative: deleted user cannot login"
+    deleted_login_payload="$(make_login_payload "$new_email" "letmein")"
+    deleted_login_resp="$(request_json "POST" "/auth-login" "/.netlify/functions/auth-login" "$deleted_login_payload")"
+    deleted_login_code="$(printf '%s' "$deleted_login_resp" | sed -n '2p')"
+    deleted_login_body="$(printf '%s' "$deleted_login_resp" | sed -n '3,$p')"
+    if [[ "$deleted_login_code" != "401" ]]; then
+      echo "ERROR: deleted user login: expected 401 but got $deleted_login_code" >&2
+      echo "$deleted_login_body" >&2
+      exit 1
+    fi
+
+    echo "OK: Phase 3 admin mutation smoke passed"
+  fi
+fi
+
 echo "OK: smoke test passed (${provider})"
+
 
