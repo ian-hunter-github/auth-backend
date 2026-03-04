@@ -5,14 +5,24 @@ import { jsonOk, jsonTooManyRequests, requireMethod, toErrorResponse } from "../
 import type { AuthRegisterRequest } from "../../src/contracts/auth.js";
 import { register } from "../../src/services/authService.js";
 import { buildRequestContext } from "../../src/security/requestContext.js";
-import { checkRateLimit } from "../../src/security/rateLimiter.js";
+import { checkRateLimit, makeRateKey, rateKeyFromContext } from "../../src/security/rateLimiter.js";
 
-const RATE_POLICY = {
+const REGISTER_IP_POLICY = {
   bucketSeconds: 60,
-  // Keep intentionally high for now; we will tighten once we add dedicated tests and add email/IP dual-keying.
-  maxHits: 500,
-  route: "auth-register"
+  maxHits: 20,
+  route: "auth-register:ip"
 };
+
+const REGISTER_IP_IDENTIFIER_POLICY = {
+  bucketSeconds: 60,
+  maxHits: 5,
+  route: "auth-register:ip+email"
+};
+
+function normalizeEmail(v: string | undefined): string | undefined {
+  const s = (v || "").trim().toLowerCase();
+  return s.length > 0 ? s : undefined;
+}
 
 export const handler: Handler = async (event) => {
   const requestId = getOrCreateRequestId(event.headers || {});
@@ -21,12 +31,21 @@ export const handler: Handler = async (event) => {
   try {
     requireMethod(event.httpMethod, ["POST"]);
 
-    const rl = await checkRateLimit(ctx, RATE_POLICY);
-    if (!rl.allowed) {
-      return jsonTooManyRequests(requestId, rl.retryAfterSeconds);
+    const req = parseJsonBody<AuthRegisterRequest>(event.body);
+    const email = normalizeEmail(req.email);
+
+    const ipKey = rateKeyFromContext(ctx);
+    const ipLimit = await checkRateLimit(REGISTER_IP_POLICY, ipKey);
+    if (!ipLimit.allowed) {
+      return jsonTooManyRequests(requestId, ipLimit.retryAfterSeconds);
     }
 
-    const req = parseJsonBody<AuthRegisterRequest>(event.body);
+    const ipEmailKey = makeRateKey([ctx.ip, email]);
+    const ipEmailLimit = await checkRateLimit(REGISTER_IP_IDENTIFIER_POLICY, ipEmailKey);
+    if (!ipEmailLimit.allowed) {
+      return jsonTooManyRequests(requestId, ipEmailLimit.retryAfterSeconds);
+    }
+
     const data = await register(req);
     return jsonOk(201, requestId, data);
   } catch (err) {

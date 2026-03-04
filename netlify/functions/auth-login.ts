@@ -5,14 +5,24 @@ import { jsonOk, jsonTooManyRequests, requireMethod, toErrorResponse } from "../
 import type { AuthLoginRequest } from "../../src/contracts/auth.js";
 import { login } from "../../src/services/authService.js";
 import { buildRequestContext } from "../../src/security/requestContext.js";
-import { checkRateLimit } from "../../src/security/rateLimiter.js";
+import { checkRateLimit, makeRateKey, rateKeyFromContext } from "../../src/security/rateLimiter.js";
 
-const RATE_POLICY = {
+const LOGIN_IP_POLICY = {
   bucketSeconds: 60,
-  // Keep intentionally high for now; we will tighten once we add dedicated rate limit tests and endpoint-specific keys.
-  maxHits: 1000,
-  route: "auth-login"
+  maxHits: 60,
+  route: "auth-login:ip"
 };
+
+const LOGIN_IP_IDENTIFIER_POLICY = {
+  bucketSeconds: 60,
+  maxHits: 10,
+  route: "auth-login:ip+identifier"
+};
+
+function normalizeIdentifier(v: string | undefined): string | undefined {
+  const s = (v || "").trim().toLowerCase();
+  return s.length > 0 ? s : undefined;
+}
 
 export const handler: Handler = async (event) => {
   const requestId = getOrCreateRequestId(event.headers || {});
@@ -21,12 +31,22 @@ export const handler: Handler = async (event) => {
   try {
     requireMethod(event.httpMethod, ["POST"]);
 
-    const rl = await checkRateLimit(ctx, RATE_POLICY);
-    if (!rl.allowed) {
-      return jsonTooManyRequests(requestId, rl.retryAfterSeconds);
+    // Parse early so we can rate-limit by identifier. This is cheap and avoids per-request password hashing work under attack.
+    const req = parseJsonBody<AuthLoginRequest>(event.body);
+    const identifier = normalizeIdentifier(req.username);
+
+    const ipKey = rateKeyFromContext(ctx);
+    const ipLimit = await checkRateLimit(LOGIN_IP_POLICY, ipKey);
+    if (!ipLimit.allowed) {
+      return jsonTooManyRequests(requestId, ipLimit.retryAfterSeconds);
     }
 
-    const req = parseJsonBody<AuthLoginRequest>(event.body);
+    const ipIdKey = makeRateKey([ctx.ip, identifier]);
+    const ipIdLimit = await checkRateLimit(LOGIN_IP_IDENTIFIER_POLICY, ipIdKey);
+    if (!ipIdLimit.allowed) {
+      return jsonTooManyRequests(requestId, ipIdLimit.retryAfterSeconds);
+    }
+
     const data = await login(req);
     return jsonOk(200, requestId, data);
   } catch (err) {

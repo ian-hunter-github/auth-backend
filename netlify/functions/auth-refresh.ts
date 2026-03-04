@@ -5,13 +5,12 @@ import { jsonOk, jsonTooManyRequests, requireMethod, toErrorResponse } from "../
 import type { AuthRefreshRequest } from "../../src/contracts/auth.js";
 import { refresh } from "../../src/services/authService.js";
 import { buildRequestContext } from "../../src/security/requestContext.js";
-import { checkRateLimit } from "../../src/security/rateLimiter.js";
+import { checkRateLimit, rateKeyFromContext } from "../../src/security/rateLimiter.js";
 
-const RATE_POLICY = {
+const REFRESH_IP_POLICY = {
   bucketSeconds: 60,
-  // Keep intentionally high for now; we will tighten and key by user/session later.
-  maxHits: 2000,
-  route: "auth-refresh"
+  maxHits: 120,
+  route: "auth-refresh:ip"
 };
 
 export const handler: Handler = async (event) => {
@@ -21,9 +20,10 @@ export const handler: Handler = async (event) => {
   try {
     requireMethod(event.httpMethod, ["POST"]);
 
-    const rl = await checkRateLimit(ctx, RATE_POLICY);
-    if (!rl.allowed) {
-      return jsonTooManyRequests(requestId, rl.retryAfterSeconds);
+    const ipKey = rateKeyFromContext(ctx);
+    const ipLimit = await checkRateLimit(REFRESH_IP_POLICY, ipKey);
+    if (!ipLimit.allowed) {
+      return jsonTooManyRequests(requestId, ipLimit.retryAfterSeconds);
     }
 
     const req = parseJsonBody<AuthRefreshRequest>(event.body);

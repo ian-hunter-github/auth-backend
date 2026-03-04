@@ -16,6 +16,10 @@ const pool = process.env.PG_CONNECTION_STRING
   ? new Pool({ connectionString: process.env.PG_CONNECTION_STRING })
   : undefined;
 
+type MemKey = string;
+
+const memCounters = new Map<MemKey, { hits: number; expiresAtMs: number }>();
+
 function bucketStart(now: Date, seconds: number): Date {
   const ms = seconds * 1000;
   return new Date(Math.floor(now.getTime() / ms) * ms);
@@ -28,14 +32,53 @@ function calcRetryAfterSeconds(now: Date, bucketSeconds: number): number {
   return Math.max(0, Math.ceil(remainingMs / 1000));
 }
 
-export async function checkRateLimit(ctx: RequestContext, policy: RateLimitPolicy): Promise<RateLimitResult> {
-  if (!pool) return { allowed: true };
+function toKeyPart(v: string | undefined): string | undefined {
+  const s = (v || "").trim();
+  return s.length > 0 ? s : undefined;
+}
+
+export function makeRateKey(parts: Array<string | undefined>): string {
+  const cleaned = parts.map(toKeyPart).filter((v): v is string => Boolean(v));
+  return cleaned.length > 0 ? cleaned.join("|") : "unknown";
+}
+
+function memKey(policy: RateLimitPolicy, rateKey: string, bucketIso: string): MemKey {
+  return `${policy.route}::${rateKey}::${policy.bucketSeconds}::${bucketIso}`;
+}
+
+function memCheck(policy: RateLimitPolicy, rateKey: string): RateLimitResult {
+  const now = new Date();
+  const bucket = bucketStart(now, policy.bucketSeconds);
+  const expiresAtMs = bucket.getTime() + policy.bucketSeconds * 1000;
+  const key = memKey(policy, rateKey, bucket.toISOString());
+
+  const existing = memCounters.get(key);
+  if (!existing || existing.expiresAtMs <= now.getTime()) {
+    memCounters.set(key, { hits: 1, expiresAtMs });
+    return { allowed: 1 <= policy.maxHits };
+  }
+
+  existing.hits += 1;
+  memCounters.set(key, existing);
+
+  if (existing.hits <= policy.maxHits) return { allowed: true };
+  return { allowed: false, retryAfterSeconds: calcRetryAfterSeconds(now, policy.bucketSeconds) };
+}
+
+export async function checkRateLimit(
+  policy: RateLimitPolicy,
+  rateKey: string
+): Promise<RateLimitResult> {
+  const key = makeRateKey([rateKey]);
+
+  // Deterministic fallback for tests/dev when PG isn't configured.
+  if (!pool) {
+    return memCheck(policy, key);
+  }
 
   const now = new Date();
   const bucket = bucketStart(now, policy.bucketSeconds);
   const expires = new Date(bucket.getTime() + policy.bucketSeconds * 1000);
-
-  const key = ctx.ip || "unknown";
 
   const client = await pool.connect();
   try {
@@ -60,4 +103,8 @@ export async function checkRateLimit(ctx: RequestContext, policy: RateLimitPolic
   } finally {
     client.release();
   }
+}
+
+export function rateKeyFromContext(ctx: RequestContext): string {
+  return makeRateKey([ctx.ip || "unknown"]);
 }
