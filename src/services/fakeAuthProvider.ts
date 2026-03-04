@@ -16,6 +16,7 @@ import type {
 type FakeUser = AuthUserProfile & {
   email: string;
   password: string;
+  deletedAt?: string;
 };
 
 type FakeSession = {
@@ -25,15 +26,69 @@ type FakeSession = {
   expiresAt: string;
 };
 
+type FakeUserStore = {
+  usersById: Record<string, FakeUser>;
+};
+
 type FakeSessionStore = {
   sessionsByRefreshToken: Record<string, FakeSession>;
 };
 
-const STORE_PATH = "/tmp/identity-backend-fake-sessions.json";
+const USERS_STORE_PATH = "/tmp/identity-backend-fake-users.json";
+const SESSIONS_STORE_PATH = "/tmp/identity-backend-fake-sessions.json";
 
-async function loadStore(): Promise<FakeSessionStore> {
+async function loadUserStore(): Promise<FakeUserStore> {
   try {
-    const raw = await fs.readFile(STORE_PATH, "utf8");
+    const raw = await fs.readFile(USERS_STORE_PATH, "utf8");
+    const parsed = JSON.parse(raw) as FakeUserStore;
+    if (!parsed || typeof parsed !== "object") return { usersById: {} };
+    if (!parsed.usersById || typeof parsed.usersById !== "object") return { usersById: {} };
+    return parsed;
+  } catch {
+    return { usersById: {} };
+  }
+}
+
+async function saveUserStore(store: FakeUserStore): Promise<void> {
+  const tmp = `${USERS_STORE_PATH}.${crypto.randomBytes(6).toString("hex")}.tmp`;
+  await fs.writeFile(tmp, JSON.stringify(store), "utf8");
+  await fs.rename(tmp, USERS_STORE_PATH);
+}
+
+async function ensureSeedUsers(): Promise<void> {
+  const store = await loadUserStore();
+
+  const DEMO_USER_ID = "user_demo_001";
+  const USER_USER_ID = "user_basic_002";
+
+  if (!store.usersById[DEMO_USER_ID]) {
+    store.usersById[DEMO_USER_ID] = {
+      id: DEMO_USER_ID,
+      username: "demo",
+      displayName: "Demo User",
+      roles: ["user"],
+      email: "demo@example.com",
+      password: "letmein"
+    };
+  }
+
+  if (!store.usersById[USER_USER_ID]) {
+    store.usersById[USER_USER_ID] = {
+      id: USER_USER_ID,
+      username: "user",
+      displayName: "Basic User",
+      roles: ["user"],
+      email: "user@example.com",
+      password: "letmein"
+    };
+  }
+
+  await saveUserStore(store);
+}
+
+async function loadSessionStore(): Promise<FakeSessionStore> {
+  try {
+    const raw = await fs.readFile(SESSIONS_STORE_PATH, "utf8");
     const parsed = JSON.parse(raw) as FakeSessionStore;
     if (!parsed || typeof parsed !== "object") return { sessionsByRefreshToken: {} };
     if (!parsed.sessionsByRefreshToken || typeof parsed.sessionsByRefreshToken !== "object") {
@@ -45,55 +100,11 @@ async function loadStore(): Promise<FakeSessionStore> {
   }
 }
 
-async function saveStore(store: FakeSessionStore): Promise<void> {
-  const tmp = `${STORE_PATH}.${crypto.randomBytes(6).toString("hex")}.tmp`;
+async function saveSessionStore(store: FakeSessionStore): Promise<void> {
+  const tmp = `${SESSIONS_STORE_PATH}.${crypto.randomBytes(6).toString("hex")}.tmp`;
   await fs.writeFile(tmp, JSON.stringify(store), "utf8");
-  await fs.rename(tmp, STORE_PATH);
+  await fs.rename(tmp, SESSIONS_STORE_PATH);
 }
-
-const DEMO_USER_ID = "user_demo_001";
-const DEMO_USERNAME = "demo";
-const DEMO_EMAIL = "demo@example.com";
-const DEMO_PASSWORD = "letmein";
-
-const USER_USER_ID = "user_basic_002";
-const USER_USERNAME = "user";
-const USER_EMAIL = "user@example.com";
-const USER_PASSWORD = "letmein";
-
-const usersByEmail = new Map<string, FakeUser>();
-const usersById = new Map<string, FakeUser>();
-
-function seedDemo() {
-  if (!usersById.has(DEMO_USER_ID)) {
-    const u: FakeUser = {
-      id: DEMO_USER_ID,
-      username: DEMO_USERNAME,
-      displayName: "Demo User",
-      roles: ["user"],
-      email: DEMO_EMAIL,
-      password: DEMO_PASSWORD
-    };
-
-    usersByEmail.set(DEMO_EMAIL, u);
-    usersById.set(DEMO_USER_ID, u);
-  }
-
-  if (!usersById.has(USER_USER_ID)) {
-    const u: FakeUser = {
-      id: USER_USER_ID,
-      username: USER_USERNAME,
-      displayName: "Basic User",
-      roles: ["user"],
-      email: USER_EMAIL,
-      password: USER_PASSWORD
-    };
-
-    usersByEmail.set(USER_EMAIL, u);
-    usersById.set(USER_USER_ID, u);
-  }
-}
-seedDemo();
 
 function nowIso() {
   return new Date().toISOString();
@@ -116,9 +127,9 @@ async function createSession(userId: string): Promise<{ refreshToken: string; ex
   const refreshToken = newRefreshToken(userId);
   const expiresAt = addMinutesIso(60);
 
-  const store = await loadStore();
+  const store = await loadSessionStore();
   store.sessionsByRefreshToken[refreshToken] = { userId, refreshToken, expiresAt };
-  await saveStore(store);
+  await saveSessionStore(store);
 
   return { refreshToken, expiresAt };
 }
@@ -153,15 +164,33 @@ function parseRefreshToken(token: string): { userId: string } {
   return { userId };
 }
 
-function requireUserByEmail(email: string): FakeUser {
-  const u = usersByEmail.get(email);
-  if (!u) throw new AppError("Invalid credentials", { code: "UNAUTHORIZED", status: 401 });
+async function findUserByEmail(email: string): Promise<FakeUser | undefined> {
+  await ensureSeedUsers();
+  const store = await loadUserStore();
+  const target = email.trim().toLowerCase();
+  for (const u of Object.values(store.usersById)) {
+    if (u.email.trim().toLowerCase() === target) return u;
+  }
+  return undefined;
+}
+
+async function requireActiveUserByEmail(email: string): Promise<FakeUser> {
+  const u = await findUserByEmail(email);
+  if (!u || u.deletedAt) throw new AppError("Invalid credentials", { code: "UNAUTHORIZED", status: 401 });
   return u;
 }
 
-function requireUserById(userId: string): FakeUser {
-  const u = usersById.get(userId);
+async function requireUserById(id: string): Promise<FakeUser> {
+  await ensureSeedUsers();
+  const store = await loadUserStore();
+  const u = store.usersById[id];
   if (!u) throw new AppError("Not found", { code: "NOT_FOUND", status: 404 });
+  return u;
+}
+
+async function requireActiveUserById(id: string): Promise<FakeUser> {
+  const u = await requireUserById(id);
+  if (u.deletedAt) throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
   return u;
 }
 
@@ -189,6 +218,26 @@ function normalizeRoles(roles: string[] | undefined): string[] {
   return unique.length > 0 ? unique : ["user"];
 }
 
+async function revokeSessionsForUser(userId: string): Promise<void> {
+  const store = await loadSessionStore();
+  let changed = false;
+
+  for (const k of Object.keys(store.sessionsByRefreshToken)) {
+    const v = store.sessionsByRefreshToken[k];
+    if (!v) continue;
+    if (v.userId !== userId) continue;
+    if (v.revokedAt) continue;
+
+    v.revokedAt = nowIso();
+    store.sessionsByRefreshToken[k] = v;
+    changed = true;
+  }
+
+  if (changed) {
+    await saveSessionStore(store);
+  }
+}
+
 export const fakeAuthProvider: AuthProvider = {
   login: async (req: AuthLoginRequest): Promise<AuthLoginResponse> => {
     const username = (req.username || "").trim();
@@ -202,8 +251,8 @@ export const fakeAuthProvider: AuthProvider = {
       });
     }
 
-    const email = username === "demo" ? DEMO_EMAIL : username;
-    const u = requireUserByEmail(email);
+    const email = username === "demo" ? "demo@example.com" : username;
+    const u = await requireActiveUserByEmail(email);
 
     if (u.password !== password) {
       throw new AppError("Invalid credentials", { code: "UNAUTHORIZED", status: 401 });
@@ -226,9 +275,13 @@ export const fakeAuthProvider: AuthProvider = {
       });
     }
 
-    if (usersByEmail.has(email)) {
+    const existing = await findUserByEmail(email);
+    if (existing && !existing.deletedAt) {
       throw new AppError("Email already exists", { code: "CONFLICT", status: 409 });
     }
+
+    await ensureSeedUsers();
+    const store = await loadUserStore();
 
     const id = `user_${crypto.randomBytes(6).toString("hex")}`;
 
@@ -241,8 +294,8 @@ export const fakeAuthProvider: AuthProvider = {
       password
     };
 
-    usersByEmail.set(email, user);
-    usersById.set(id, user);
+    store.usersById[id] = user;
+    await saveUserStore(store);
 
     const s = await createSession(id);
     return toAuthResponse(user, s);
@@ -260,7 +313,7 @@ export const fakeAuthProvider: AuthProvider = {
 
     const parsed = parseRefreshToken(refreshToken);
 
-    const store = await loadStore();
+    const store = await loadSessionStore();
     const existing = store.sessionsByRefreshToken[refreshToken];
 
     if (!existing) {
@@ -279,14 +332,15 @@ export const fakeAuthProvider: AuthProvider = {
       throw new AppError("Refresh token expired", { code: "UNAUTHORIZED", status: 401 });
     }
 
+    const u = await requireActiveUserById(parsed.userId);
+
     // Rotate refresh token: revoke old + issue new
     existing.revokedAt = nowIso();
     store.sessionsByRefreshToken[refreshToken] = existing;
 
     const next = await createSession(parsed.userId);
-    await saveStore(store);
+    await saveSessionStore(store);
 
-    const u = requireUserById(parsed.userId);
     return {
       provider: "fake",
       session: {
@@ -305,47 +359,28 @@ export const fakeAuthProvider: AuthProvider = {
   },
 
   logout: async (accessToken: string, req?: AuthLogoutRequest): Promise<void> => {
-    // Logout semantics:
-    // - If refreshToken provided, revoke that session only
-    // - Else, revoke all refresh sessions for this user
     const userId = parseAccessToken(accessToken);
-    requireUserById(userId);
+    await requireUserById(userId);
+
+    const store = await loadSessionStore();
 
     const rt = (req?.refreshToken || "").trim();
-
-    const store = await loadStore();
-
     if (rt) {
       const s = store.sessionsByRefreshToken[rt];
       if (s && s.userId === userId && !s.revokedAt) {
         s.revokedAt = nowIso();
         store.sessionsByRefreshToken[rt] = s;
-        await saveStore(store);
+        await saveSessionStore(store);
       }
       return;
     }
 
-    let changed = false;
-    for (const k of Object.keys(store.sessionsByRefreshToken)) {
-      const v = store.sessionsByRefreshToken[k];
-      if (!v) continue;
-
-      if (v.userId !== userId) continue;
-      if (v.revokedAt) continue;
-
-      v.revokedAt = nowIso();
-      store.sessionsByRefreshToken[k] = v;
-      changed = true;
-    }
-
-    if (changed) {
-      await saveStore(store);
-    }
+    await revokeSessionsForUser(userId);
   },
 
   getUserFromToken: async (token: string): Promise<AuthUserProfile> => {
     const userId = parseAccessToken(token);
-    const u = requireUserById(userId);
+    const u = await requireActiveUserById(userId);
     return {
       id: u.id,
       username: u.username,
@@ -355,7 +390,9 @@ export const fakeAuthProvider: AuthProvider = {
   },
 
   listUsers: async (): Promise<AuthUserProfile[]> => {
-    return Array.from(usersById.values()).map((u) => ({
+    await ensureSeedUsers();
+    const store = await loadUserStore();
+    return Object.values(store.usersById).map((u) => ({
       id: u.id,
       username: u.username,
       displayName: u.displayName,
@@ -364,7 +401,7 @@ export const fakeAuthProvider: AuthProvider = {
   },
 
   getUserById: async (id: string): Promise<AuthUserProfile> => {
-    const u = requireUserById(id);
+    const u = await requireUserById(id);
     return {
       id: u.id,
       username: u.username,
@@ -387,9 +424,13 @@ export const fakeAuthProvider: AuthProvider = {
       });
     }
 
-    if (usersByEmail.has(email)) {
+    const existing = await findUserByEmail(email);
+    if (existing && !existing.deletedAt) {
       throw new AppError("Email already exists", { code: "CONFLICT", status: 409 });
     }
+
+    await ensureSeedUsers();
+    const store = await loadUserStore();
 
     const id = `user_${crypto.randomBytes(6).toString("hex")}`;
 
@@ -402,8 +443,8 @@ export const fakeAuthProvider: AuthProvider = {
       password
     };
 
-    usersByEmail.set(email, user);
-    usersById.set(id, user);
+    store.usersById[id] = user;
+    await saveUserStore(store);
 
     return {
       id: user.id,
@@ -414,7 +455,11 @@ export const fakeAuthProvider: AuthProvider = {
   },
 
   updateUser: async (id: string, input: UpdateUserInput): Promise<AuthUserProfile> => {
-    const u = requireUserById(id);
+    await ensureSeedUsers();
+    const store = await loadUserStore();
+
+    const u = store.usersById[id];
+    if (!u) throw new AppError("Not found", { code: "NOT_FOUND", status: 404 });
 
     if (input.displayName !== undefined) {
       u.displayName = (input.displayName || "").trim();
@@ -423,8 +468,8 @@ export const fakeAuthProvider: AuthProvider = {
       u.roles = normalizeRoles(input.roles);
     }
 
-    usersById.set(u.id, u);
-    usersByEmail.set(u.email, u);
+    store.usersById[id] = u;
+    await saveUserStore(store);
 
     return {
       id: u.id,
@@ -432,6 +477,21 @@ export const fakeAuthProvider: AuthProvider = {
       displayName: u.displayName,
       roles: u.roles
     };
+  },
+
+  deleteUser: async (id: string): Promise<void> => {
+    await ensureSeedUsers();
+    const store = await loadUserStore();
+
+    const u = store.usersById[id];
+    if (!u) throw new AppError("Not found", { code: "NOT_FOUND", status: 404 });
+
+    if (!u.deletedAt) {
+      u.deletedAt = nowIso();
+      store.usersById[id] = u;
+      await saveUserStore(store);
+      await revokeSessionsForUser(u.id);
+    }
   }
 };
 

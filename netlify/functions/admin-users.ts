@@ -1,11 +1,12 @@
 import type { Handler } from "@netlify/functions";
 import { getOrCreateRequestId } from "../../src/lib/requestId.js";
 import { parseJsonBody } from "../../src/lib/body.js";
-import { jsonOk, requireMethod, toErrorResponse } from "../../src/lib/response.js";
+import { jsonNoContent, jsonOk, requireMethod, toErrorResponse } from "../../src/lib/response.js";
 import { getBearerToken } from "../../src/lib/authHeader.js";
 import type { AdminCreateUserRequest, AdminUpdateUserRequest } from "../../src/contracts/adminUsers.js";
 import {
   createAdminUser,
+  deleteAdminUser,
   getAdminUserById,
   getAdminUsers,
   updateAdminUser
@@ -28,7 +29,7 @@ function getIdFromPath(pathname: string | undefined): string | undefined {
 export const handler: Handler = async (event) => {
   const requestId = getOrCreateRequestId(event.headers || {});
   try {
-    requireMethod(event.httpMethod, ["GET", "POST", "PATCH"]);
+    requireMethod(event.httpMethod, ["GET", "POST", "PATCH", "DELETE"]);
 
     const token = getBearerToken(event.headers || {});
     const id = getIdFromPath(event.path);
@@ -52,13 +53,21 @@ export const handler: Handler = async (event) => {
       return jsonOk(201, requestId, data);
     }
 
-    // PATCH
+    if (event.httpMethod === "PATCH") {
+      if (!id) {
+        return jsonOk(400, requestId, { message: "Missing user id" });
+      }
+      const req = parseJsonBody<AdminUpdateUserRequest>(event.body);
+      const data = await updateAdminUser(token, id, req);
+      return jsonOk(200, requestId, data);
+    }
+
+    // DELETE
     if (!id) {
       return jsonOk(400, requestId, { message: "Missing user id" });
     }
-    const req = parseJsonBody<AdminUpdateUserRequest>(event.body);
-    const data = await updateAdminUser(token, id, req);
-    return jsonOk(200, requestId, data);
+    await deleteAdminUser(token, id);
+    return jsonNoContent(204, requestId);
   } catch (err) {
     return toErrorResponse(requestId, err);
   }

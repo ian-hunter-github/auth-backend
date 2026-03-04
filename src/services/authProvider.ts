@@ -32,5 +32,6 @@ export type AuthProvider = {
   getUserById: (id: string) => Promise<AuthUserProfile>;
   createUser: (input: CreateUserInput) => Promise<AuthUserProfile>;
   updateUser: (id: string, input: UpdateUserInput) => Promise<AuthUserProfile>;
+  deleteUser: (id: string) => Promise<void>;
 };
 

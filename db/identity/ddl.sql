@@ -16,6 +16,10 @@ create table if not exists identity.users (
 alter table identity.users
   add column if not exists roles text[] not null default array['user'];
 
+-- Phase 3 Chunk B: soft delete
+alter table identity.users
+  add column if not exists deleted_at timestamptz null;
+
 -- Refresh token sessions (hashed-at-rest)
 create table if not exists identity.sessions (
   id uuid primary key default gen_random_uuid(),

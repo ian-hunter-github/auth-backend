@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import type { SuccessEnvelope, ErrorEnvelope } from "../src/lib/response.js";
-import type { AuthLoginResponse } from "../src/contracts/auth.js";
+import type { AuthLoginResponse, AuthRefreshResponse } from "../src/contracts/auth.js";
 import type {
   AdminCreateUserRequest,
   AdminUpdateUserRequest,
@@ -24,10 +24,15 @@ async function login(username: string, password: string, rid: string) {
     body: JSON.stringify({ username, password })
   });
 
+  return res;
+}
+
+async function loginOk(username: string, password: string, rid: string) {
+  const res = await login(username, password, rid);
   expect(res.status).toBe(200);
   const body = (await res.json()) as SuccessEnvelope<AuthLoginResponse>;
   expect(body.ok).toBe(true);
-  return body.data.session.accessToken;
+  return body.data;
 }
 
 describe("admin users (/.netlify/functions/admin-users)", () => {
@@ -42,7 +47,7 @@ describe("admin users (/.netlify/functions/admin-users)", () => {
   });
 
   it("admin can list users and get by id", async () => {
-    const adminAccess = await login("demo", "letmein", "admin-users-login-demo");
+    const adminAccess = (await loginOk("demo", "letmein", "admin-users-login-demo")).session.accessToken;
 
     const listRes = await fetch(`${baseUrl}/.netlify/functions/admin-users`, {
       headers: { authorization: `Bearer ${adminAccess}`, "x-request-id": "admin-users-list-200" }
@@ -68,8 +73,8 @@ describe("admin users (/.netlify/functions/admin-users)", () => {
   });
 
   it("admin can create and patch users; non-admin forbidden", async () => {
-    const adminAccess = await login("demo", "letmein", "admin-users-login-admin");
-    const userAccess = await login("user@example.com", "letmein", "admin-users-login-user");
+    const adminAccess = (await loginOk("demo", "letmein", "admin-users-login-admin")).session.accessToken;
+    const userAccess = (await loginOk("user@example.com", "letmein", "admin-users-login-user")).session.accessToken;
 
     const forbiddenRes = await fetch(`${baseUrl}/.netlify/functions/admin-users`, {
       method: "POST",
@@ -152,6 +157,52 @@ describe("admin users (/.netlify/functions/admin-users)", () => {
     expect(patchBody.ok).toBe(true);
     expect(patchBody.data.user.displayName).toBe("Updated Name");
     expect(patchBody.data.user.roles).toContain("admin");
+  });
+
+  it("admin can soft delete users; deleted user cannot login or refresh", async () => {
+    const adminAccess = (await loginOk("demo", "letmein", "admin-users-login-admin-2")).session.accessToken;
+
+    const createRes = await fetch(`${baseUrl}/.netlify/functions/admin-users`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${adminAccess}`,
+        "content-type": "application/json",
+        "x-request-id": "admin-users-create-softdel-201"
+      },
+      body: JSON.stringify({
+        email: "to-delete@example.com",
+        password: "letmein",
+        displayName: "To Delete",
+        roles: ["user"]
+      } satisfies AdminCreateUserRequest)
+    });
+
+    expect(createRes.status).toBe(201);
+    const createBody = (await createRes.json()) as SuccessEnvelope<AdminUserResponse>;
+    expect(createBody.ok).toBe(true);
+
+    const loginBody = await loginOk("to-delete@example.com", "letmein", "admin-users-login-todelete");
+    const refreshToken = loginBody.session.refreshToken;
+
+    const delRes = await fetch(`${baseUrl}/.netlify/functions/admin-users/${createBody.data.user.id}`, {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${adminAccess}`, "x-request-id": "admin-users-del-204" }
+    });
+
+    expect(delRes.status).toBe(204);
+
+    const loginAfterRes = await login("to-delete@example.com", "letmein", "admin-users-login-todelete-after");
+    expect(loginAfterRes.status).toBe(401);
+
+    const refreshAfterRes = await fetch(`${baseUrl}/.netlify/functions/auth-refresh`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-request-id": "admin-users-refresh-after-del" },
+      body: JSON.stringify({ refreshToken })
+    });
+
+    expect(refreshAfterRes.status).toBe(401);
+    const refreshAfterBody = (await refreshAfterRes.json()) as ErrorEnvelope | SuccessEnvelope<AuthRefreshResponse>;
+    expect(refreshAfterBody.ok).toBe(false);
   });
 });
 

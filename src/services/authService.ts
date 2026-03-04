@@ -68,3 +68,7 @@ export async function updateUser(id: string, input: UpdateUserInput): Promise<Au
   return selectProvider().updateUser(id, input);
 }
 
+export async function deleteUser(id: string): Promise<void> {
+  return selectProvider().deleteUser(id);
+}
+

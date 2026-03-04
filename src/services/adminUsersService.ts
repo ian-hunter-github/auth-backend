@@ -7,7 +7,7 @@ import type {
   AdminUserResponse,
   AdminUsersResponse
 } from "../contracts/adminUsers.js";
-import { createUser, getUserById, getUserFromToken, listUsers, updateUser } from "./authService.js";
+import { createUser, deleteUser, getUserById, getUserFromToken, listUsers, updateUser } from "./authService.js";
 
 function parseCsv(v: string | undefined): string[] {
   if (!v) return [];
@@ -100,5 +100,10 @@ export async function updateAdminUser(
 
   const user = await updateUser(id, { ...(hasDisplayName ? { displayName } : {}), ...(hasRoles ? { roles } : {}) });
   return { user };
+}
+
+export async function deleteAdminUser(token: string, id: string): Promise<void> {
+  await requireAdmin(token);
+  await deleteUser(id);
 }
 

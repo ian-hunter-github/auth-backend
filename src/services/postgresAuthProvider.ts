@@ -21,6 +21,7 @@ type DbUserRow = {
   email: string;
   display_name: string;
   roles?: string[] | null;
+  deleted_at?: string | null;
   password_salt?: string | null;
   password_hash?: string | null;
 };
@@ -67,6 +68,12 @@ function toProfile(row: DbUserRow): AuthUserProfile {
     displayName: row.display_name,
     roles
   };
+}
+
+function requireNotDeleted(row: DbUserRow): void {
+  if (row.deleted_at) {
+    throw new AppError("Invalid credentials", { code: "UNAUTHORIZED", status: 401 });
+  }
 }
 
 const TOKEN_PREFIX = "pg-access-token.";
@@ -180,7 +187,7 @@ export const postgresAuthProvider: AuthProvider = {
     const email = username === "demo" ? "demo@example.com" : username;
     const p = getPool();
     const { rows } = await p.query<DbUserRow>(
-      "select id, email, display_name, roles, password_salt, password_hash from identity.users where email = $1 limit 1",
+      "select id, email, display_name, roles, deleted_at, password_salt, password_hash from identity.users where email = $1 limit 1",
       [email]
     );
 
@@ -188,6 +195,8 @@ export const postgresAuthProvider: AuthProvider = {
     if (!row) {
       throw new AppError("Invalid credentials", { code: "UNAUTHORIZED", status: 401 });
     }
+
+    requireNotDeleted(row);
 
     const { salt, hash } = requirePasswordFields(row);
     const expected = hashPassword(salt, password);
@@ -240,7 +249,7 @@ export const postgresAuthProvider: AuthProvider = {
       `
       insert into identity.users (email, display_name, roles, password_salt, password_hash)
       values ($1, $2, $3, $4, $5)
-      returning id, email, display_name, roles, password_salt, password_hash
+      returning id, email, display_name, roles, deleted_at, password_salt, password_hash
       `,
       [email, displayName || email, roles, salt, hash]
     );
@@ -297,11 +306,8 @@ export const postgresAuthProvider: AuthProvider = {
       throw new AppError("Invalid or expired refresh token", { code: "UNAUTHORIZED", status: 401 });
     }
 
-    await revokeSessionByHash(refreshTokenHash);
-    const { refreshToken: nextRefreshToken, expiresAt } = await createSession(s.user_id);
-
     const { rows: userRows } = await p.query<DbUserRow>(
-      "select id, email, display_name, roles from identity.users where id = $1::uuid limit 1",
+      "select id, email, display_name, roles, deleted_at from identity.users where id = $1::uuid limit 1",
       [s.user_id]
     );
 
@@ -309,6 +315,11 @@ export const postgresAuthProvider: AuthProvider = {
     if (!u) {
       throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
     }
+
+    requireNotDeleted(u);
+
+    await revokeSessionByHash(refreshTokenHash);
+    const { refreshToken: nextRefreshToken, expiresAt } = await createSession(s.user_id);
 
     const accessToken = accessTokenForUser(u.id);
 
@@ -342,7 +353,7 @@ export const postgresAuthProvider: AuthProvider = {
 
     const p = getPool();
     const { rows } = await p.query<DbUserRow>(
-      "select id, email, display_name, roles from identity.users where id = $1::uuid limit 1",
+      "select id, email, display_name, roles, deleted_at from identity.users where id = $1::uuid limit 1",
       [userId]
     );
 
@@ -350,13 +361,16 @@ export const postgresAuthProvider: AuthProvider = {
     if (!row) {
       throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
     }
+
+    requireNotDeleted(row);
+
     return toProfile(row);
   },
 
   listUsers: async (): Promise<AuthUserProfile[]> => {
     const p = getPool();
     const { rows } = await p.query<DbUserRow>(
-      "select id, email, display_name, roles from identity.users order by email asc",
+      "select id, email, display_name, roles, deleted_at from identity.users order by email asc",
       []
     );
 
@@ -366,7 +380,7 @@ export const postgresAuthProvider: AuthProvider = {
   getUserById: async (id: string): Promise<AuthUserProfile> => {
     const p = getPool();
     const { rows } = await p.query<DbUserRow>(
-      "select id, email, display_name, roles from identity.users where id = $1::uuid limit 1",
+      "select id, email, display_name, roles, deleted_at from identity.users where id = $1::uuid limit 1",
       [id]
     );
 
@@ -408,7 +422,7 @@ export const postgresAuthProvider: AuthProvider = {
       `
       insert into identity.users (email, display_name, roles, password_salt, password_hash)
       values ($1, $2, $3, $4, $5)
-      returning id, email, display_name, roles
+      returning id, email, display_name, roles, deleted_at
       `,
       [email, displayName || email, roles, salt, hash]
     );
@@ -437,7 +451,7 @@ export const postgresAuthProvider: AuthProvider = {
         display_name = case when $2::boolean then $3 else display_name end,
         roles = case when $4::boolean then $5::text[] else roles end
       where id = $1::uuid
-      returning id, email, display_name, roles
+      returning id, email, display_name, roles, deleted_at
       `,
       [id, hasDisplayName, displayName, hasRoles, roles]
     );
@@ -448,6 +462,30 @@ export const postgresAuthProvider: AuthProvider = {
     }
 
     return toProfile(row);
+  },
+
+  deleteUser: async (id: string): Promise<void> => {
+    const p = getPool();
+    const { rowCount } = await p.query(
+      `
+      update identity.users
+      set deleted_at = $2::timestamptz
+      where id = $1::uuid
+        and deleted_at is null
+      `,
+      [id, nowIso()]
+    );
+
+    if (!rowCount) {
+      // Either not found or already deleted. For admin delete, treat as NOT_FOUND.
+      const { rows } = await p.query<{ id: string }>("select id from identity.users where id = $1::uuid limit 1", [id]);
+      if (!rows[0]) {
+        throw new AppError("Not found", { code: "NOT_FOUND", status: 404 });
+      }
+      // already deleted -> no-op
+    }
+
+    await revokeSessionsByUserId(id);
   }
 };
 
