@@ -66,6 +66,14 @@ export function jsonError(
   };
 }
 
+export function jsonBadRequest(requestId: string, message: string, details?: unknown): HandlerResponse {
+  return jsonError(400, requestId, "BAD_REQUEST", message, details);
+}
+
+export function jsonMethodNotAllowed(requestId: string, details?: unknown): HandlerResponse {
+  return jsonError(405, requestId, "BAD_REQUEST", "Method not allowed", details);
+}
+
 export function toErrorResponse(requestId: string, err: unknown): HandlerResponse {
   if (isAppError(err)) {
     return jsonError(err.status, requestId, err.code, err.message, err.details);
@@ -87,4 +95,3 @@ export function requireMethod(actual: string | undefined, allowed: string[]) {
 }
 
 export { jsonOk };
-

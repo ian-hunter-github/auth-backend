@@ -1,5 +1,4 @@
 import { AppError } from "../lib/errors.js";
-import { getEnv } from "../lib/env.js";
 import type { AuthUserProfile } from "../contracts/auth.js";
 import type {
   AdminCreateUserRequest,
@@ -7,29 +6,8 @@ import type {
   AdminUserResponse,
   AdminUsersResponse
 } from "../contracts/adminUsers.js";
+import { isAdminUser } from "../security/adminPolicy.js";
 import { createUser, deleteUser, getUserById, getUserFromToken, listUsers, updateUser } from "./authService.js";
-
-function parseCsv(v: string | undefined): string[] {
-  if (!v) return [];
-  return v
-    .split(",")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-}
-
-function isAdminUser(user: AuthUserProfile): boolean {
-  // Primary mechanism (Phase 3 Step 2): DB-backed roles (via provider)
-  if (user.roles.includes("admin")) return true;
-
-  // Break-glass / bootstrap allowlists (still useful for emergencies)
-  const adminIds = parseCsv(getEnv("ADMIN_USER_IDS"));
-  if (adminIds.includes(user.id)) return true;
-
-  const adminEmails = parseCsv(getEnv("ADMIN_USER_EMAILS"));
-  if (adminEmails.includes(user.username)) return true;
-
-  return false;
-}
 
 async function requireAdmin(token: string): Promise<AuthUserProfile> {
   const caller = await getUserFromToken(token);
@@ -106,4 +84,3 @@ export async function deleteAdminUser(token: string, id: string): Promise<void> 
   await requireAdmin(token);
   await deleteUser(id);
 }
-

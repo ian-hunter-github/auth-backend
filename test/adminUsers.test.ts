@@ -50,6 +50,40 @@ describe("admin users (/.netlify/functions/admin-users)", () => {
     expect(body.ok).toBe(false);
   });
 
+  it("returns ok:false for method not allowed and missing id", async () => {
+    const adminAccess = (await loginOk("demo", "letmein", "admin-users-login-demo-errs")).session.accessToken;
+
+    const postIdRes = await fetch(`${baseUrl}/.netlify/functions/admin-users/00000000-0000-0000-0000-000000000000`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${adminAccess}`,
+        "content-type": "application/json",
+        "x-request-id": "admin-users-post-id-405"
+      },
+      body: JSON.stringify({ email: "x@example.com", password: "letmein" } satisfies AdminCreateUserRequest)
+    });
+
+    expect(postIdRes.status).toBe(405);
+    const postIdBody = (await postIdRes.json()) as ErrorEnvelope;
+    expect(postIdBody.ok).toBe(false);
+    expect(postIdBody.error.code).toBe("BAD_REQUEST");
+
+    const patchNoIdRes = await fetch(`${baseUrl}/.netlify/functions/admin-users`, {
+      method: "PATCH",
+      headers: {
+        authorization: `Bearer ${adminAccess}`,
+        "content-type": "application/json",
+        "x-request-id": "admin-users-patch-noid-400"
+      },
+      body: JSON.stringify({ displayName: "x" } satisfies AdminUpdateUserRequest)
+    });
+
+    expect(patchNoIdRes.status).toBe(400);
+    const patchNoIdBody = (await patchNoIdRes.json()) as ErrorEnvelope;
+    expect(patchNoIdBody.ok).toBe(false);
+    expect(patchNoIdBody.error.code).toBe("BAD_REQUEST");
+  });
+
   it("admin can list users and get by id", async () => {
     const adminAccess = (await loginOk("demo", "letmein", "admin-users-login-demo")).session.accessToken;
 
@@ -213,4 +247,3 @@ describe("admin users (/.netlify/functions/admin-users)", () => {
     expect(refreshAfterBody.ok).toBe(false);
   });
 });
-

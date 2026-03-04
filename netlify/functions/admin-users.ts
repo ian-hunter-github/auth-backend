@@ -1,7 +1,7 @@
 import type { Handler } from "@netlify/functions";
 import { getOrCreateRequestId } from "../../src/lib/requestId.js";
 import { parseJsonBody } from "../../src/lib/body.js";
-import { jsonNoContent, jsonOk, requireMethod, toErrorResponse } from "../../src/lib/response.js";
+import { jsonBadRequest, jsonMethodNotAllowed, jsonNoContent, jsonOk, requireMethod, toErrorResponse } from "../../src/lib/response.js";
 import { getBearerToken } from "../../src/lib/authHeader.js";
 import type { AdminCreateUserRequest, AdminUpdateUserRequest } from "../../src/contracts/adminUsers.js";
 import {
@@ -46,7 +46,7 @@ export const handler: Handler = async (event) => {
     if (event.httpMethod === "POST") {
       if (id) {
         // POST to /admin-users/:id is not supported
-        return jsonOk(405, requestId, { message: "Method not allowed" });
+        return jsonMethodNotAllowed(requestId);
       }
       const req = parseJsonBody<AdminCreateUserRequest>(event.body);
       const data = await createAdminUser(token, req);
@@ -55,7 +55,7 @@ export const handler: Handler = async (event) => {
 
     if (event.httpMethod === "PATCH") {
       if (!id) {
-        return jsonOk(400, requestId, { message: "Missing user id" });
+        return jsonBadRequest(requestId, "Missing user id");
       }
       const req = parseJsonBody<AdminUpdateUserRequest>(event.body);
       const data = await updateAdminUser(token, id, req);
@@ -64,7 +64,7 @@ export const handler: Handler = async (event) => {
 
     // DELETE
     if (!id) {
-      return jsonOk(400, requestId, { message: "Missing user id" });
+      return jsonBadRequest(requestId, "Missing user id");
     }
     await deleteAdminUser(token, id);
     return jsonNoContent(204, requestId);
@@ -72,4 +72,3 @@ export const handler: Handler = async (event) => {
     return toErrorResponse(requestId, err);
   }
 };
-
