@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import type { ErrorEnvelope } from "../src/lib/response.js";
+import type { ErrorEnvelope, SuccessEnvelope } from "../src/lib/response.js";
+import type { AuthLoginResponse, AuthRegisterResponse } from "../src/contracts/auth.js";
 
 let baseUrl = "";
 
@@ -12,25 +13,34 @@ beforeAll(() => {
 
 describe("rate limiting", () => {
   it("429s after too many auth-login attempts (ip+identifier) and returns retry-after", async () => {
-    // Use a unique identifier not used elsewhere in the suite so we don't accidentally
-    // interact with other tests' login calls.
-    const username = "ratelimit_user";
-    const password = "bad-password";
+    const email = `ratelimit_${Date.now()}@example.com`;
+    const password = "letmein";
 
-    // First 10 attempts should not be rate-limited (they may be 401 invalid credentials).
+    const reg = await fetch(`${baseUrl}/.netlify/functions/auth-register`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-request-id": "test-rl-register" },
+      body: JSON.stringify({ email, password, displayName: "Rate Limit User" }),
+    });
+    expect(reg.status).toBe(201);
+    const regBody = (await reg.json()) as SuccessEnvelope<AuthRegisterResponse>;
+    expect(regBody.ok).toBe(true);
+
+    // First 10 attempts should not be rate-limited (they should succeed).
     for (let i = 0; i < 10; i++) {
       const res = await fetch(`${baseUrl}/.netlify/functions/auth-login`, {
         method: "POST",
         headers: { "content-type": "application/json", "x-request-id": `test-rl-login-${i}` },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ username: email, password }),
       });
-      expect([200, 401]).toContain(res.status);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as SuccessEnvelope<AuthLoginResponse>;
+      expect(body.ok).toBe(true);
     }
 
     const limited = await fetch(`${baseUrl}/.netlify/functions/auth-login`, {
       method: "POST",
       headers: { "content-type": "application/json", "x-request-id": "test-rl-login-429" },
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ username: email, password }),
     });
 
     expect(limited.status).toBe(429);

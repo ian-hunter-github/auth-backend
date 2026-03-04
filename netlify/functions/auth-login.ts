@@ -23,7 +23,8 @@ const LOGIN_IP_IDENTIFIER_POLICY = {
 
 const LOCKOUT_POLICY = {
   windowSeconds: 15 * 60,
-  maxFailures: 20,
+  // Must be < LOGIN_IP_IDENTIFIER_POLICY.maxHits so lockout is observable independently of rate limiting.
+  maxFailures: 8,
   lockSeconds: 15 * 60,
   scope: "ip+identifier" as const
 };

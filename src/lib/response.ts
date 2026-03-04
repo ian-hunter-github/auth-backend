@@ -76,7 +76,7 @@ export function jsonMethodNotAllowed(requestId: string, details?: unknown): Hand
 
 export function jsonTooManyRequests(requestId: string, retryAfterSeconds?: number): HandlerResponse {
   const details = retryAfterSeconds === undefined ? undefined : { retryAfterSeconds };
-  const res = jsonError(429, requestId, "RATE_LIMITED", "Too many requests", details);
+  const res = jsonError(429, requestId, "RATE_LIMITED", "Too many attempts. Try again later.", details);
 
   const headers = res.headers || {};
   if (retryAfterSeconds !== undefined) {
