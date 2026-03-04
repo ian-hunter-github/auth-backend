@@ -52,3 +52,6 @@ export async function getUserFromToken(token: string): Promise<AuthUserProfile> 
   return selectProvider().getUserFromToken(token);
 }
 
+export async function listUsers(): Promise<AuthUserProfile[]> {
+  return selectProvider().listUsers();
+}

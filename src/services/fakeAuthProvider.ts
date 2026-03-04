@@ -56,23 +56,42 @@ const DEMO_USERNAME = "demo";
 const DEMO_EMAIL = "demo@example.com";
 const DEMO_PASSWORD = "letmein";
 
+const USER_USER_ID = "user_basic_002";
+const USER_USERNAME = "user";
+const USER_EMAIL = "user@example.com";
+const USER_PASSWORD = "letmein";
+
 const usersByEmail = new Map<string, FakeUser>();
 const usersById = new Map<string, FakeUser>();
 
 function seedDemo() {
-  if (usersById.has(DEMO_USER_ID)) return;
+  if (!usersById.has(DEMO_USER_ID)) {
+    const u: FakeUser = {
+      id: DEMO_USER_ID,
+      username: DEMO_USERNAME,
+      displayName: "Demo User",
+      roles: ["user"],
+      email: DEMO_EMAIL,
+      password: DEMO_PASSWORD
+    };
 
-  const u: FakeUser = {
-    id: DEMO_USER_ID,
-    username: DEMO_USERNAME,
-    displayName: "Demo User",
-    roles: ["user"],
-    email: DEMO_EMAIL,
-    password: DEMO_PASSWORD
-  };
+    usersByEmail.set(DEMO_EMAIL, u);
+    usersById.set(DEMO_USER_ID, u);
+  }
 
-  usersByEmail.set(DEMO_EMAIL, u);
-  usersById.set(DEMO_USER_ID, u);
+  if (!usersById.has(USER_USER_ID)) {
+    const u: FakeUser = {
+      id: USER_USER_ID,
+      username: USER_USERNAME,
+      displayName: "Basic User",
+      roles: ["user"],
+      email: USER_EMAIL,
+      password: USER_PASSWORD
+    };
+
+    usersByEmail.set(USER_EMAIL, u);
+    usersById.set(USER_USER_ID, u);
+  }
 }
 seedDemo();
 
@@ -104,46 +123,46 @@ async function createSession(userId: string): Promise<{ refreshToken: string; ex
   return { refreshToken, expiresAt };
 }
 
-function requireUserById(userId: string): FakeUser {
-  const u = usersById.get(userId);
-  if (!u) {
-    throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
-  }
-  return u;
-}
-
 function parseAccessToken(token: string): string {
   const t = (token || "").trim();
-  if (!t) {
-    throw new AppError("Missing token", { code: "UNAUTHORIZED", status: 401 });
-  }
+  if (!t) throw new AppError("Missing token", { code: "UNAUTHORIZED", status: 401 });
+
   const prefix = "fake-access-token.";
-  if (!t.startsWith(prefix)) {
-    throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
-  }
+  if (!t.startsWith(prefix)) throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
+
   const userId = t.slice(prefix.length);
-  if (!userId) {
-    throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
-  }
+  if (!userId) throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
+
   return userId;
 }
 
-function toAuthResponse(user: FakeUser, session: { refreshToken: string; expiresAt: string }): AuthLoginResponse {
-  return {
-    provider: "fake",
-    session: {
-      accessToken: accessTokenForUser(user.id),
-      tokenType: "bearer",
-      refreshToken: session.refreshToken,
-      expiresAt: session.expiresAt
-    },
-    user: {
-      id: user.id,
-      username: user.username,
-      displayName: user.displayName,
-      roles: user.roles
-    }
-  };
+function parseRefreshToken(token: string): { userId: string } {
+  const t = (token || "").trim();
+  if (!t) throw new AppError("Missing refresh token", { code: "UNAUTHORIZED", status: 401 });
+
+  const prefix = "fake-refresh-token.";
+  if (!t.startsWith(prefix)) throw new AppError("Invalid refresh token", { code: "UNAUTHORIZED", status: 401 });
+
+  const rest = t.slice(prefix.length);
+  const dot = rest.indexOf(".");
+  if (dot <= 0) throw new AppError("Invalid refresh token", { code: "UNAUTHORIZED", status: 401 });
+
+  const userId = rest.slice(0, dot);
+  if (!userId) throw new AppError("Invalid refresh token", { code: "UNAUTHORIZED", status: 401 });
+
+  return { userId };
+}
+
+function requireUserByEmail(email: string): FakeUser {
+  const u = usersByEmail.get(email);
+  if (!u) throw new AppError("Invalid credentials", { code: "UNAUTHORIZED", status: 401 });
+  return u;
+}
+
+function requireUserById(userId: string): FakeUser {
+  const u = usersById.get(userId);
+  if (!u) throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
+  return u;
 }
 
 export const fakeAuthProvider: AuthProvider = {
@@ -160,13 +179,30 @@ export const fakeAuthProvider: AuthProvider = {
     }
 
     const email = username === "demo" ? DEMO_EMAIL : username;
-    const u = usersByEmail.get(email);
-    if (!u || u.password !== password) {
+    const u = requireUserByEmail(email);
+
+    if (u.password !== password) {
       throw new AppError("Invalid credentials", { code: "UNAUTHORIZED", status: 401 });
     }
 
-    const s = await createSession(u.id);
-    return toAuthResponse(u, s);
+    const accessToken = accessTokenForUser(u.id);
+    const { refreshToken, expiresAt } = await createSession(u.id);
+
+    return {
+      provider: "fake",
+      session: {
+        accessToken,
+        tokenType: "bearer",
+        refreshToken,
+        expiresAt
+      },
+      user: {
+        id: u.id,
+        username: u.username,
+        displayName: u.displayName,
+        roles: u.roles
+      }
+    };
   },
 
   register: async (req: AuthRegisterRequest): Promise<AuthRegisterResponse> => {
@@ -186,8 +222,9 @@ export const fakeAuthProvider: AuthProvider = {
       throw new AppError("Email already exists", { code: "CONFLICT", status: 409 });
     }
 
-    const id = `user_${crypto.randomBytes(8).toString("hex")}`;
-    const u: FakeUser = {
+    const id = `user_${crypto.randomBytes(6).toString("hex")}`;
+
+    const user: FakeUser = {
       id,
       username: email,
       displayName: displayName || email,
@@ -196,16 +233,32 @@ export const fakeAuthProvider: AuthProvider = {
       password
     };
 
-    usersByEmail.set(email, u);
-    usersById.set(id, u);
+    usersByEmail.set(email, user);
+    usersById.set(id, user);
 
-    const s = await createSession(u.id);
-    return toAuthResponse(u, s);
+    const accessToken = accessTokenForUser(id);
+    const { refreshToken, expiresAt } = await createSession(id);
+
+    return {
+      provider: "fake",
+      session: {
+        accessToken,
+        tokenType: "bearer",
+        refreshToken,
+        expiresAt
+      },
+      user: {
+        id: user.id,
+        username: user.username,
+        displayName: user.displayName,
+        roles: user.roles
+      }
+    };
   },
 
   refresh: async (req: AuthRefreshRequest): Promise<AuthRefreshResponse> => {
-    const refreshToken = (req.refreshToken || "").trim();
-    if (!refreshToken) {
+    const rt = (req.refreshToken || "").trim();
+    if (!rt) {
       throw new AppError("refreshToken is required", {
         code: "BAD_REQUEST",
         status: 400,
@@ -213,36 +266,56 @@ export const fakeAuthProvider: AuthProvider = {
       });
     }
 
+    const parsed = parseRefreshToken(rt);
+
     const store = await loadStore();
-    const s = store.sessionsByRefreshToken[refreshToken];
+    const existing = store.sessionsByRefreshToken[rt];
 
-    if (!s) {
-      throw new AppError("Invalid or expired refresh token", { code: "UNAUTHORIZED", status: 401 });
-    }
-    if (s.revokedAt) {
-      throw new AppError("Invalid or expired refresh token", { code: "UNAUTHORIZED", status: 401 });
-    }
-    if (new Date(s.expiresAt).getTime() <= Date.now()) {
-      throw new AppError("Invalid or expired refresh token", { code: "UNAUTHORIZED", status: 401 });
+    if (!existing) {
+      throw new AppError("Invalid refresh token", { code: "UNAUTHORIZED", status: 401 });
     }
 
-    s.revokedAt = nowIso();
-    store.sessionsByRefreshToken[refreshToken] = s;
+    if (existing.userId !== parsed.userId) {
+      throw new AppError("Invalid refresh token", { code: "UNAUTHORIZED", status: 401 });
+    }
 
-    const next = await createSession(s.userId);
+    if (existing.revokedAt) {
+      throw new AppError("Refresh token revoked", { code: "UNAUTHORIZED", status: 401 });
+    }
+
+    if (new Date(existing.expiresAt).getTime() <= Date.now()) {
+      throw new AppError("Refresh token expired", { code: "UNAUTHORIZED", status: 401 });
+    }
+
+    // Rotate refresh token: revoke old + issue new
+    existing.revokedAt = nowIso();
+    store.sessionsByRefreshToken[rt] = existing;
+
+    const { refreshToken, expiresAt } = await createSession(parsed.userId);
+
     await saveStore(store);
 
-    const u = requireUserById(s.userId);
-    return toAuthResponse(u, next);
+    return {
+      provider: "fake",
+      session: {
+        accessToken: accessTokenForUser(parsed.userId),
+        tokenType: "bearer",
+        refreshToken,
+        expiresAt
+      }
+    };
   },
 
   logout: async (accessToken: string, req?: AuthLogoutRequest): Promise<void> => {
+    // Logout semantics:
+    // - If refreshToken provided, revoke that session only
+    // - Else, revoke all refresh sessions for this user
     const userId = parseAccessToken(accessToken);
-    requireUserById(userId);
+
+    const rt = (req?.refreshToken || "").trim();
 
     const store = await loadStore();
 
-    const rt = (req?.refreshToken || "").trim();
     if (rt) {
       const s = store.sessionsByRefreshToken[rt];
       if (s && s.userId === userId && !s.revokedAt) {
@@ -280,6 +353,14 @@ export const fakeAuthProvider: AuthProvider = {
       displayName: u.displayName,
       roles: u.roles
     };
+  },
+
+  listUsers: async (): Promise<AuthUserProfile[]> => {
+    return Array.from(usersById.values()).map((u) => ({
+      id: u.id,
+      username: u.username,
+      displayName: u.displayName,
+      roles: u.roles
+    }));
   }
 };
-

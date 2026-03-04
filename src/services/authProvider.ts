@@ -15,5 +15,5 @@ export type AuthProvider = {
   refresh: (req: AuthRefreshRequest) => Promise<AuthRefreshResponse>;
   logout: (accessToken: string, req?: AuthLogoutRequest) => Promise<void>;
   getUserFromToken: (token: string) => Promise<AuthUserProfile>;
+  listUsers: () => Promise<AuthUserProfile[]>;
 };
-

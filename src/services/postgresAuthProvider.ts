@@ -11,7 +11,7 @@ import type {
   AuthRefreshResponse,
   AuthRegisterRequest,
   AuthRegisterResponse,
-  AuthUserProfile,
+  AuthUserProfile
 } from "../contracts/auth.js";
 
 const { Pool } = pg;
@@ -52,7 +52,7 @@ function getPool(): pg.Pool {
     user,
     password,
     ...(port ? { port: Number(port) } : {}),
-    ...(ssl ? { ssl } : {}),
+    ...(ssl ? { ssl } : {})
   });
 
   return pool;
@@ -63,7 +63,7 @@ function toProfile(row: DbUserRow): AuthUserProfile {
     id: row.id,
     username: row.email,
     displayName: row.display_name,
-    roles: ["user"],
+    roles: ["user"]
   };
 }
 
@@ -92,8 +92,7 @@ function accessTokenForUser(userId: string): string {
 function parseAccessToken(token: string): string {
   const t = (token || "").trim();
   if (!t) throw new AppError("Missing token", { code: "UNAUTHORIZED", status: 401 });
-  if (!t.startsWith(TOKEN_PREFIX))
-    throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
+  if (!t.startsWith(TOKEN_PREFIX)) throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
   const userId = t.slice(TOKEN_PREFIX.length);
   if (!userId) throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
   return userId;
@@ -110,7 +109,7 @@ async function createSession(userId: string): Promise<{ refreshToken: string; ex
     insert into identity.sessions (user_id, refresh_token_hash, expires_at)
     values ($1::uuid, $2, $3::timestamptz)
     `,
-    [userId, refreshTokenHash, expiresAt],
+    [userId, refreshTokenHash, expiresAt]
   );
 
   return { refreshToken, expiresAt };
@@ -125,7 +124,7 @@ async function revokeSessionByHash(refreshTokenHash: string): Promise<void> {
     where refresh_token_hash = $1
       and revoked_at is null
     `,
-    [refreshTokenHash, nowIso()],
+    [refreshTokenHash, nowIso()]
   );
 }
 
@@ -138,7 +137,7 @@ async function revokeSessionsByUserId(userId: string): Promise<void> {
     where user_id = $1::uuid
       and revoked_at is null
     `,
-    [userId, nowIso()],
+    [userId, nowIso()]
   );
 }
 
@@ -151,8 +150,10 @@ function requirePasswordFields(row: DbUserRow): { salt: string; hash: string } {
   return { salt, hash };
 }
 
-function hashPassword(saltHex: string, password: string): string {
-  return sha256Hex(`${saltHex}${password}`);
+function hashPassword(salt: string, password: string): string {
+  // Must match DB seeding formula:
+  // encode(digest(convert_to(password_salt || password_plain,'utf8'),'sha256'),'hex')
+  return sha256Hex(`${salt}${password}`);
 }
 
 export const postgresAuthProvider: AuthProvider = {
@@ -164,7 +165,7 @@ export const postgresAuthProvider: AuthProvider = {
       throw new AppError("username and password are required", {
         code: "BAD_REQUEST",
         status: 400,
-        details: { fields: ["username", "password"] },
+        details: { fields: ["username", "password"] }
       });
     }
 
@@ -172,7 +173,7 @@ export const postgresAuthProvider: AuthProvider = {
     const p = getPool();
     const { rows } = await p.query<DbUserRow>(
       "select id, email, display_name, password_salt, password_hash from identity.users where email = $1 limit 1",
-      [email],
+      [email]
     );
 
     const row = rows[0];
@@ -195,9 +196,9 @@ export const postgresAuthProvider: AuthProvider = {
         accessToken,
         tokenType: "bearer",
         refreshToken,
-        expiresAt,
+        expiresAt
       },
-      user: toProfile(row),
+      user: toProfile(row)
     };
   },
 
@@ -210,14 +211,14 @@ export const postgresAuthProvider: AuthProvider = {
       throw new AppError("email and password are required", {
         code: "BAD_REQUEST",
         status: 400,
-        details: { fields: ["email", "password"] },
+        details: { fields: ["email", "password"] }
       });
     }
 
     const p = getPool();
     const { rows: existing } = await p.query<{ id: string }>(
       "select id from identity.users where email = $1 limit 1",
-      [email],
+      [email]
     );
     if (existing[0]) {
       throw new AppError("Email already exists", { code: "CONFLICT", status: 409 });
@@ -232,7 +233,7 @@ export const postgresAuthProvider: AuthProvider = {
       values ($1, $2, $3, $4)
       returning id, email, display_name, password_salt, password_hash
       `,
-      [email, displayName || email, salt, hash],
+      [email, displayName || email, salt, hash]
     );
 
     const u = rows[0];
@@ -247,9 +248,9 @@ export const postgresAuthProvider: AuthProvider = {
         accessToken,
         tokenType: "bearer",
         refreshToken,
-        expiresAt,
+        expiresAt
       },
-      user: toProfile(u),
+      user: toProfile(u)
     };
   },
 
@@ -259,7 +260,7 @@ export const postgresAuthProvider: AuthProvider = {
       throw new AppError("refreshToken is required", {
         code: "BAD_REQUEST",
         status: 400,
-        details: { fields: ["refreshToken"] },
+        details: { fields: ["refreshToken"] }
       });
     }
 
@@ -273,7 +274,7 @@ export const postgresAuthProvider: AuthProvider = {
       where refresh_token_hash = $1
       limit 1
       `,
-      [refreshTokenHash],
+      [refreshTokenHash]
     );
 
     const s = rows[0];
@@ -292,7 +293,7 @@ export const postgresAuthProvider: AuthProvider = {
 
     const { rows: userRows } = await p.query<DbUserRow>(
       "select id, email, display_name from identity.users where id = $1::uuid limit 1",
-      [s.user_id],
+      [s.user_id]
     );
 
     const u = userRows[0];
@@ -308,9 +309,9 @@ export const postgresAuthProvider: AuthProvider = {
         accessToken,
         tokenType: "bearer",
         refreshToken: nextRefreshToken,
-        expiresAt,
+        expiresAt
       },
-      user: toProfile(u),
+      user: toProfile(u)
     };
   },
 
@@ -333,7 +334,7 @@ export const postgresAuthProvider: AuthProvider = {
     const p = getPool();
     const { rows } = await p.query<DbUserRow>(
       "select id, email, display_name from identity.users where id = $1::uuid limit 1",
-      [userId],
+      [userId]
     );
 
     const row = rows[0];
@@ -342,4 +343,14 @@ export const postgresAuthProvider: AuthProvider = {
     }
     return toProfile(row);
   },
+
+  listUsers: async (): Promise<AuthUserProfile[]> => {
+    const p = getPool();
+    const { rows } = await p.query<DbUserRow>(
+      "select id, email, display_name from identity.users order by email asc",
+      []
+    );
+
+    return rows.map((r) => toProfile(r));
+  }
 };

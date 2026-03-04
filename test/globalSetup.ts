@@ -3,6 +3,7 @@ import { startNetlifyDev } from "./netlifyDevHarness.js";
 type Harness = Awaited<ReturnType<typeof startNetlifyDev>>;
 
 declare global {
+  // eslint-disable-next-line no-var
   var __NETLIFY_DEV_HARNESS__: Harness | undefined;
 }
 
@@ -10,6 +11,10 @@ export default async function globalSetup() {
   // Force deterministic CI-safe provider for ALL unit/integration tests, regardless of developer env.
   process.env.AUTH_PROVIDER = "fake";
   process.env.NODE_ENV = "test";
+
+  // Make the demo user an admin for the admin-users endpoint tests.
+  // (Changing env during a test won't affect the already-running netlify dev process.)
+  process.env.ADMIN_USER_EMAILS = "demo";
 
   // JWT unit tests require this even if the Netlify functions don't.
   if (!process.env.AUTH_JWT_SECRET) {
@@ -21,4 +26,3 @@ export default async function globalSetup() {
 
   process.env.TEST_BASE_URL = harness.baseUrl;
 }
-
