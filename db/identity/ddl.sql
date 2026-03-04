@@ -12,6 +12,10 @@ create table if not exists identity.users (
   created_at timestamptz not null default now()
 );
 
+-- Phase 3 Step 2: DB-backed roles
+alter table identity.users
+  add column if not exists roles text[] not null default array['user'];
+
 -- Refresh token sessions (hashed-at-rest)
 create table if not exists identity.sessions (
   id uuid primary key default gen_random_uuid(),

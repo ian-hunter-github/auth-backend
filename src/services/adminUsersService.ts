@@ -13,8 +13,10 @@ function parseCsv(v: string | undefined): string[] {
 }
 
 function isAdminUser(user: AuthUserProfile): boolean {
+  // Primary mechanism (Phase 3 Step 2): DB-backed roles (via provider)
   if (user.roles.includes("admin")) return true;
 
+  // Break-glass / bootstrap allowlists (still useful for emergencies)
   const adminIds = parseCsv(getEnv("ADMIN_USER_IDS"));
   if (adminIds.includes(user.id)) return true;
 
@@ -33,3 +35,4 @@ export async function getAdminUsers(token: string): Promise<AdminUsersResponse> 
   const users = await listUsers();
   return { users };
 }
+

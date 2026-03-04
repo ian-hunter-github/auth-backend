@@ -79,7 +79,7 @@ fi
 
 if [[ "$NO_TESTS" -ne 1 ]]; then
   step "npm run test:run"
-  npm run test:run
+  (RUN_PG_TESTS=1 npm run test:run)
 else
   step "skip tests (--no-tests)"
 fi

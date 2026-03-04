@@ -20,6 +20,7 @@ type DbUserRow = {
   id: string;
   email: string;
   display_name: string;
+  roles?: string[] | null;
   password_salt?: string | null;
   password_hash?: string | null;
 };
@@ -59,11 +60,12 @@ function getPool(): pg.Pool {
 }
 
 function toProfile(row: DbUserRow): AuthUserProfile {
+  const roles = Array.isArray(row.roles) && row.roles.length > 0 ? row.roles : ["user"];
   return {
     id: row.id,
     username: row.email,
     displayName: row.display_name,
-    roles: ["user"]
+    roles
   };
 }
 
@@ -172,7 +174,7 @@ export const postgresAuthProvider: AuthProvider = {
     const email = username === "demo" ? "demo@example.com" : username;
     const p = getPool();
     const { rows } = await p.query<DbUserRow>(
-      "select id, email, display_name, password_salt, password_hash from identity.users where email = $1 limit 1",
+      "select id, email, display_name, roles, password_salt, password_hash from identity.users where email = $1 limit 1",
       [email]
     );
 
@@ -224,16 +226,17 @@ export const postgresAuthProvider: AuthProvider = {
       throw new AppError("Email already exists", { code: "CONFLICT", status: 409 });
     }
 
+    const roles = ["user"];
     const salt = randomHex(16);
     const hash = hashPassword(salt, password);
 
     const { rows } = await p.query<DbUserRow>(
       `
-      insert into identity.users (email, display_name, password_salt, password_hash)
-      values ($1, $2, $3, $4)
-      returning id, email, display_name, password_salt, password_hash
+      insert into identity.users (email, display_name, roles, password_salt, password_hash)
+      values ($1, $2, $3, $4, $5)
+      returning id, email, display_name, roles, password_salt, password_hash
       `,
-      [email, displayName || email, salt, hash]
+      [email, displayName || email, roles, salt, hash]
     );
 
     const u = rows[0];
@@ -292,7 +295,7 @@ export const postgresAuthProvider: AuthProvider = {
     const { refreshToken: nextRefreshToken, expiresAt } = await createSession(s.user_id);
 
     const { rows: userRows } = await p.query<DbUserRow>(
-      "select id, email, display_name from identity.users where id = $1::uuid limit 1",
+      "select id, email, display_name, roles from identity.users where id = $1::uuid limit 1",
       [s.user_id]
     );
 
@@ -333,7 +336,7 @@ export const postgresAuthProvider: AuthProvider = {
 
     const p = getPool();
     const { rows } = await p.query<DbUserRow>(
-      "select id, email, display_name from identity.users where id = $1::uuid limit 1",
+      "select id, email, display_name, roles from identity.users where id = $1::uuid limit 1",
       [userId]
     );
 
@@ -347,10 +350,11 @@ export const postgresAuthProvider: AuthProvider = {
   listUsers: async (): Promise<AuthUserProfile[]> => {
     const p = getPool();
     const { rows } = await p.query<DbUserRow>(
-      "select id, email, display_name from identity.users order by email asc",
+      "select id, email, display_name, roles from identity.users order by email asc",
       []
     );
 
     return rows.map((r) => toProfile(r));
   }
 };
+
