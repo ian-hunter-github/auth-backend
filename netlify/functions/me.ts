@@ -15,3 +15,4 @@ export const handler: Handler = async (event) => {
     return toErrorResponse(requestId, err);
   }
 };
+

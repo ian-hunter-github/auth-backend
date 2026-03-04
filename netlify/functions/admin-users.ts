@@ -1,8 +1,15 @@
 import type { Handler } from "@netlify/functions";
 import { getOrCreateRequestId } from "../../src/lib/requestId.js";
 import { parseJsonBody } from "../../src/lib/body.js";
-import { jsonBadRequest, jsonMethodNotAllowed, jsonNoContent, jsonOk, requireMethod, toErrorResponse } from "../../src/lib/response.js";
 import { getBearerToken } from "../../src/lib/authHeader.js";
+import {
+  jsonBadRequest,
+  jsonMethodNotAllowed,
+  jsonNoContent,
+  jsonOk,
+  requireMethod,
+  toErrorResponse
+} from "../../src/lib/response.js";
 import type { AdminCreateUserRequest, AdminUpdateUserRequest } from "../../src/contracts/adminUsers.js";
 import {
   createAdminUser,
@@ -72,3 +79,4 @@ export const handler: Handler = async (event) => {
     return toErrorResponse(requestId, err);
   }
 };
+
