@@ -118,7 +118,7 @@ async function createSession(
   userId: string,
   ctx?: RequestContext,
   opts?: { sessionFamilyId?: string; rotatedFromSessionId?: string }
-): Promise<{ refreshToken: string; expiresAt: string }> {
+): Promise<{ sessionId: string; refreshToken: string; expiresAt: string }> {
   const refreshToken = `pg-refresh-token.${randomHex(24)}`;
   const refreshTokenHash = sha256Hex(refreshToken);
   const expiresAt = addMinutesIso(60);
@@ -170,14 +170,14 @@ async function createSession(
     );
 
     await c.query("commit");
+
+    return { sessionId: id, refreshToken, expiresAt };
   } catch (e) {
     await c.query("rollback");
     throw e;
   } finally {
     c.release();
   }
-
-  return { refreshToken, expiresAt };
 }
 
 async function revokeSessionByHash(refreshTokenHash: string, ctx?: RequestContext): Promise<void> {
@@ -247,8 +247,6 @@ function requirePasswordFields(row: DbUserRow): { salt: string; hash: string } {
 }
 
 function hashPassword(salt: string, password: string): string {
-  // Must match DB seeding formula:
-  // encode(digest(convert_to(password_salt || password_plain,'utf8'),'sha256'),'hex')
   return sha256Hex(`${salt}${password}`);
 }
 
@@ -292,15 +290,15 @@ export const postgresAuthProvider: AuthProvider = {
     }
 
     const accessToken = accessTokenForUser(row.id);
-    const { refreshToken, expiresAt } = await createSession(row.id, ctx);
+    const created = await createSession(row.id, ctx);
 
     return {
       provider: "postgres",
       session: {
         accessToken,
         tokenType: "bearer",
-        refreshToken,
-        expiresAt
+        refreshToken: created.refreshToken,
+        expiresAt: created.expiresAt
       },
       user: toProfile(row)
     };
@@ -345,15 +343,15 @@ export const postgresAuthProvider: AuthProvider = {
     if (!u) throw new AppError("Failed to create user", { code: "INTERNAL_ERROR", status: 500 });
 
     const accessToken = accessTokenForUser(u.id);
-    const { refreshToken, expiresAt } = await createSession(u.id, ctx);
+    const created = await createSession(u.id, ctx);
 
     return {
       provider: "postgres",
       session: {
         accessToken,
         tokenType: "bearer",
-        refreshToken,
-        expiresAt
+        refreshToken: created.refreshToken,
+        expiresAt: created.expiresAt
       },
       user: toProfile(u)
     };
@@ -430,9 +428,25 @@ export const postgresAuthProvider: AuthProvider = {
     requireNotDeleted(u);
 
     await revokeSessionByHash(refreshTokenHash, ctx);
-    const { refreshToken: nextRefreshToken, expiresAt } = await createSession(s.user_id, ctx, {
-      sessionFamilyId: s.session_family_id || s.id,
+
+    const familyId = s.session_family_id || s.id;
+    const created = await createSession(s.user_id, ctx, {
+      sessionFamilyId: familyId,
       rotatedFromSessionId: s.id
+    });
+
+    await writeAuditLog({
+      action: "auth.refresh.rotated",
+      actorUserId: s.user_id,
+      targetUserId: s.user_id,
+      ...(ctx?.requestId ? { requestId: ctx.requestId } : {}),
+      ...(ctx?.ip ? { ip: ctx.ip } : {}),
+      ...(ctx?.userAgent ? { userAgent: ctx.userAgent } : {}),
+      details: {
+        fromSessionId: s.id,
+        toSessionId: created.sessionId,
+        sessionFamilyId: familyId
+      }
     });
 
     const accessToken = accessTokenForUser(u.id);
@@ -442,8 +456,8 @@ export const postgresAuthProvider: AuthProvider = {
       session: {
         accessToken,
         tokenType: "bearer",
-        refreshToken: nextRefreshToken,
-        expiresAt
+        refreshToken: created.refreshToken,
+        expiresAt: created.expiresAt
       },
       user: toProfile(u)
     };
@@ -454,10 +468,30 @@ export const postgresAuthProvider: AuthProvider = {
     const rt = (req?.refreshToken || "").trim();
 
     if (rt) {
+      await writeAuditLog({
+        action: "auth.logout",
+        actorUserId: userId,
+        targetUserId: userId,
+        ...(ctx?.requestId ? { requestId: ctx.requestId } : {}),
+        ...(ctx?.ip ? { ip: ctx.ip } : {}),
+        ...(ctx?.userAgent ? { userAgent: ctx.userAgent } : {}),
+        details: { mode: "single" }
+      });
+
       const refreshTokenHash = sha256Hex(rt);
       await revokeSessionByHash(refreshTokenHash, ctx);
       return;
     }
+
+    await writeAuditLog({
+      action: "auth.logout",
+      actorUserId: userId,
+      targetUserId: userId,
+      ...(ctx?.requestId ? { requestId: ctx.requestId } : {}),
+      ...(ctx?.ip ? { ip: ctx.ip } : {}),
+      ...(ctx?.userAgent ? { userAgent: ctx.userAgent } : {}),
+      details: { mode: "all" }
+    });
 
     await revokeSessionsByUserId(userId);
   },
@@ -579,7 +613,6 @@ export const postgresAuthProvider: AuthProvider = {
   deleteUser: async (id: string): Promise<void> => {
     const p = getPool();
 
-    // Soft delete user
     const { rowCount } = await p.query(
       `
       update identity.users
@@ -594,7 +627,6 @@ export const postgresAuthProvider: AuthProvider = {
       throw new AppError("User not found", { code: "NOT_FOUND", status: 404 });
     }
 
-    // Revoke sessions for user
     await revokeSessionsByUserId(id);
   }
 };

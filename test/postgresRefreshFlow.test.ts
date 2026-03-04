@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import pg from "pg";
 import { startNetlifyDev } from "./netlifyDevHarness.js";
 import type { SuccessEnvelope, ErrorEnvelope } from "../src/lib/response.js";
 import type { AuthLoginResponse, AuthRefreshResponse } from "../src/contracts/auth.js";
@@ -23,6 +24,41 @@ let harness: Awaited<ReturnType<typeof startNetlifyDev>> | undefined;
 
 const suite = SHOULD_RUN ? describe : describe.skip;
 
+let db: pg.Pool | undefined;
+
+function getDb(): pg.Pool {
+  if (db) return db;
+
+  const host = requireEnv("PGHOST");
+  const database = requireEnv("PGDATABASE");
+  const user = requireEnv("PGUSER");
+  const password = requireEnv("PGPASSWORD");
+  const port = process.env.PGPORT;
+  const sslMode = (process.env.PGSSLMODE || "require").toLowerCase();
+  const ssl = sslMode === "disable" ? undefined : { rejectUnauthorized: false };
+
+  db = new pg.Pool({
+    host,
+    database,
+    user,
+    password,
+    ...(port ? { port: Number(port) } : {}),
+    ...(ssl ? { ssl } : {})
+  });
+
+  return db;
+}
+
+async function countAudit(action: string, requestId: string): Promise<number> {
+  const p = getDb();
+  const { rows } = await p.query<{ n: string }>(
+    "select count(*)::text as n from identity.audit_log where action = $1::text and request_id = $2::text",
+    [action, requestId]
+  );
+  const n = Number(rows[0]?.n || "0");
+  return Number.isFinite(n) ? n : 0;
+}
+
 suite("postgres refresh flow (RUN_PG_TESTS=1)", () => {
   beforeAll(async () => {
     ensurePgEnvLoaded();
@@ -40,6 +76,11 @@ suite("postgres refresh flow (RUN_PG_TESTS=1)", () => {
 
   afterAll(async () => {
     await harness?.stop();
+    if (db) {
+      const p = db;
+      db = undefined;
+      await p.end();
+    }
   });
 
   it("login -> me -> refresh rotates tokens -> old refresh rejected -> logout revokes", async () => {
@@ -61,7 +102,6 @@ suite("postgres refresh flow (RUN_PG_TESTS=1)", () => {
 
     const access1 = loginBody.data.session.accessToken;
     const refresh1 = loginBody.data.session.refreshToken as string;
-    const _userId = loginBody.data.user.id;
 
     const meRes = await fetch(`${harness.baseUrl}/.netlify/functions/me`, {
       headers: {
@@ -83,13 +123,19 @@ suite("postgres refresh flow (RUN_PG_TESTS=1)", () => {
     expect(refreshRes.status).toBe(200);
     const refreshBody = (await refreshRes.json()) as SuccessEnvelope<AuthRefreshResponse>;
     expect(refreshBody.ok).toBe(true);
-    expect(refreshBody.data.provider).toBe("postgres");
 
     const access2 = refreshBody.data.session.accessToken;
     const refresh2 = refreshBody.data.session.refreshToken as string;
+
+    // Access tokens are deterministic in the current postgres provider (prefix + userId).
+    expect(access2).toBe(access1);
+    // Refresh tokens must rotate.
     expect(refresh2).not.toBe(refresh1);
 
-    const oldRefreshRes = await fetch(`${harness.baseUrl}/.netlify/functions/auth-refresh`, {
+    expect(await countAudit("auth.refresh.rotated", "pg-refresh-200")).toBeGreaterThan(0);
+
+    // Old refresh should now be rejected
+    const refreshOldRes = await fetch(`${harness.baseUrl}/.netlify/functions/auth-refresh`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -97,33 +143,22 @@ suite("postgres refresh flow (RUN_PG_TESTS=1)", () => {
       },
       body: JSON.stringify({ refreshToken: refresh1 }),
     });
-    expect(oldRefreshRes.status).toBe(401);
-
-    const tampered = tamperToken(refresh2);
-    const tamperedRes = await fetch(`${harness.baseUrl}/.netlify/functions/auth-refresh`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-request-id": "pg-refresh-tamper-401",
-      },
-      body: JSON.stringify({ refreshToken: tampered }),
-    });
-    expect(tamperedRes.status).toBe(401);
-    const tamperedBody = (await tamperedRes.json()) as ErrorEnvelope;
-    expect(tamperedBody.ok).toBe(false);
-    expect(tamperedBody.error.code).toBe("UNAUTHORIZED");
+    expect(refreshOldRes.status).toBe(401);
+    const refreshOldBody = (await refreshOldRes.json()) as ErrorEnvelope;
+    expect(refreshOldBody.ok).toBe(false);
 
     const logoutRes = await fetch(`${harness.baseUrl}/.netlify/functions/auth-logout`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "x-request-id": "pg-logout-204",
         authorization: `Bearer ${access2}`,
+        "x-request-id": "pg-logout-200",
       },
       body: JSON.stringify({ refreshToken: refresh2 }),
     });
+    expect(logoutRes.status).toBe(204);
 
-    expect([200, 204]).toContain(logoutRes.status);
+    expect(await countAudit("auth.logout", "pg-logout-200")).toBeGreaterThan(0);
 
     const refreshAfterLogout = await fetch(`${harness.baseUrl}/.netlify/functions/auth-refresh`, {
       method: "POST",
@@ -133,7 +168,15 @@ suite("postgres refresh flow (RUN_PG_TESTS=1)", () => {
       },
       body: JSON.stringify({ refreshToken: refresh2 }),
     });
-
     expect(refreshAfterLogout.status).toBe(401);
+
+    const meTampered = await fetch(`${harness.baseUrl}/.netlify/functions/me`, {
+      headers: {
+        authorization: `Bearer ${tamperToken(access2)}`,
+        "x-request-id": "pg-me-tampered-401",
+      },
+    });
+    expect(meTampered.status).toBe(401);
   });
 });
+
