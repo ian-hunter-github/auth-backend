@@ -11,9 +11,9 @@ type JwtPayload = {
   sub: string;
   iat: number;
   exp: number;
+  jti: string;
   iss?: string;
   aud?: string;
-  jti: string;
 };
 
 function base64UrlEncode(buf: Buffer): string {
@@ -50,24 +50,18 @@ function hmacSha256(secret: Buffer, msg: string): string {
   return base64UrlEncode(sig);
 }
 
-function getIssuer(): string | undefined {
-  const v = (process.env.AUTH_JWT_ISSUER || "").trim();
-  return v.length > 0 ? v : undefined;
+function getOptionalEnv(name: string): string | undefined {
+  const v = process.env[name];
+  return v && v.trim().length > 0 ? v.trim() : undefined;
 }
 
-function getAudience(): string | undefined {
-  const v = (process.env.AUTH_JWT_AUDIENCE || "").trim();
-  return v.length > 0 ? v : undefined;
-}
-
-function getClockSkewSeconds(): number {
-  const raw = Number(process.env.AUTH_JWT_CLOCK_SKEW_SECONDS || "30");
-  return Number.isFinite(raw) && raw >= 0 ? raw : 30;
-}
-
-function getMaxTtlSeconds(): number {
-  const raw = Number(process.env.AUTH_JWT_MAX_TTL_SECONDS || "86400");
-  return Number.isFinite(raw) && raw > 0 ? raw : 86400;
+function parsePositiveInt(v: string | undefined): number | undefined {
+  const s = (v || "").trim();
+  if (!s) return undefined;
+  const n = Number(s);
+  if (!Number.isFinite(n)) return undefined;
+  const i = Math.floor(n);
+  return i > 0 ? i : undefined;
 }
 
 export function signAccessToken(
@@ -81,8 +75,8 @@ export function signAccessToken(
 
   const header: JwtHeader = { alg: "HS256", typ: "JWT" };
 
-  const issuer = getIssuer();
-  const audience = getAudience();
+  const issuer = getOptionalEnv("AUTH_JWT_ISSUER");
+  const audience = getOptionalEnv("AUTH_JWT_AUDIENCE");
 
   const payload: JwtPayload = {
     sub: userId,
@@ -142,58 +136,71 @@ export function verifyAccessToken(
     throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
   }
 
-  if (
-    !payload ||
-    typeof payload.sub !== "string" ||
-    typeof payload.iat !== "number" ||
-    typeof payload.exp !== "number" ||
-    typeof payload.jti !== "string"
-  ) {
-    throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
-  }
-
   const signingInput = `${h}.${p}`;
-  const expectedSig = hmacSha256(getSecret(), signingInput);
+  const secret = getSecret();
+  const expected = hmacSha256(secret, signingInput);
 
-  if (!timingSafeEqualStr(expectedSig, sig)) {
+  if (!timingSafeEqualStr(expected, sig)) {
     throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
   }
 
   const now = opts?.now ?? new Date();
-  const skew = opts?.clockSkewSeconds ?? getClockSkewSeconds();
   const nowSec = Math.floor(now.getTime() / 1000);
+  const skew =
+    opts?.clockSkewSeconds ??
+    parsePositiveInt(getOptionalEnv("AUTH_JWT_CLOCK_SKEW_SECONDS")) ??
+    30;
 
-  // exp must be strictly after iat
-  if (!(payload.exp > payload.iat)) {
+  const userId = (payload.sub || "").trim();
+  if (!userId) {
     throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
   }
 
-  // Reject tokens issued "in the future" beyond allowed clock skew.
-  if (payload.iat > nowSec + skew) {
+  const iat = payload.iat;
+  const exp = payload.exp;
+
+  if (!Number.isFinite(iat) || !Number.isFinite(exp)) {
+    throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
+  }
+  if (exp <= iat) {
     throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
   }
 
-  // Enforce max TTL (defense in depth).
-  const maxTtl = getMaxTtlSeconds();
-  if (payload.exp - payload.iat > maxTtl) {
+  const jti = (payload.jti || "").trim();
+  if (!jti) {
     throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
   }
 
-  const issuer = getIssuer();
-  const audience = getAudience();
-
-  if (issuer && payload.iss !== issuer) {
+  // issuer / audience enforcement (only when configured)
+  const requiredIssuer = getOptionalEnv("AUTH_JWT_ISSUER");
+  if (requiredIssuer && payload.iss !== requiredIssuer) {
     throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
   }
 
-  if (audience && payload.aud !== audience) {
+  const requiredAudience = getOptionalEnv("AUTH_JWT_AUDIENCE");
+  if (requiredAudience && payload.aud !== requiredAudience) {
     throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
   }
 
-  if (nowSec > payload.exp + skew) {
+  // issued-at must not be unreasonably in the future
+  if (iat > nowSec + skew) {
     throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
   }
 
-  return { userId: payload.sub, iat: payload.iat, exp: payload.exp, jti: payload.jti };
+  // expiry check with clock skew
+  if (exp <= nowSec - skew) {
+    throw new AppError("Token expired", { code: "UNAUTHORIZED", status: 401 });
+  }
+
+  // max TTL enforcement (only when configured)
+  const maxTtlSeconds = parsePositiveInt(getOptionalEnv("AUTH_JWT_MAX_TTL_SECONDS"));
+  if (maxTtlSeconds !== undefined) {
+    const ttl = exp - iat;
+    if (ttl > maxTtlSeconds) {
+      throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
+    }
+  }
+
+  return { userId, iat, exp, jti };
 }
 
