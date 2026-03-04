@@ -18,13 +18,27 @@ export type ErrorEnvelope = {
   };
 };
 
+function baseHeaders(requestId: string): Record<string, string> {
+  return {
+    [REQUEST_ID_HEADER]: requestId,
+    "cache-control": "no-store",
+    pragma: "no-cache",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY",
+    "referrer-policy": "no-referrer",
+    "content-security-policy": "default-src 'none'",
+    "permissions-policy": "geolocation=(), microphone=(), camera=()",
+    "strict-transport-security": "max-age=63072000; includeSubDomains; preload"
+  };
+}
+
 function jsonOk<T>(statusCode: number, requestId: string, data: T): HandlerResponse {
   const body: SuccessEnvelope<T> = { ok: true, requestId, data };
   return {
     statusCode,
     headers: {
-      "content-type": "application/json; charset=utf-8",
-      [REQUEST_ID_HEADER]: requestId
+      ...baseHeaders(requestId),
+      "content-type": "application/json; charset=utf-8"
     },
     body: JSON.stringify(body)
   };
@@ -34,7 +48,7 @@ export function jsonNoContent(statusCode: number, requestId: string): HandlerRes
   return {
     statusCode,
     headers: {
-      [REQUEST_ID_HEADER]: requestId
+      ...baseHeaders(requestId)
     },
     body: ""
   };
@@ -59,8 +73,8 @@ export function jsonError(
   return {
     statusCode,
     headers: {
-      "content-type": "application/json; charset=utf-8",
-      [REQUEST_ID_HEADER]: requestId
+      ...baseHeaders(requestId),
+      "content-type": "application/json; charset=utf-8"
     },
     body: JSON.stringify(body)
   };
@@ -78,7 +92,7 @@ export function jsonTooManyRequests(requestId: string, retryAfterSeconds?: numbe
   const details = retryAfterSeconds === undefined ? undefined : { retryAfterSeconds };
   const res = jsonError(429, requestId, "RATE_LIMITED", "Too many attempts. Try again later.", details);
 
-  const headers = res.headers || {};
+  const headers = { ...(res.headers || {}) };
   if (retryAfterSeconds !== undefined) {
     headers["retry-after"] = String(retryAfterSeconds);
   }
@@ -107,3 +121,4 @@ export function requireMethod(actual: string | undefined, allowed: string[]) {
 }
 
 export { jsonOk };
+

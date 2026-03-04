@@ -20,6 +20,10 @@ describe("GET /.netlify/functions/health", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("x-request-id")).toBe("test-health-001");
 
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(res.headers.get("x-frame-options")).toBe("DENY");
+
     const body = (await res.json()) as SuccessEnvelope<HealthResponse>;
     expect(body.ok).toBe(true);
     expect(body.requestId).toBe("test-health-001");
