@@ -71,7 +71,7 @@ export const handler: Handler = async (event) => {
     }
 
     try {
-      const data = await login(req);
+      const data = await login(req, ctx);
 
       if (identifier) {
         await recordLoginSuccess(LOCKOUT_POLICY, { identifier, ip: ctx.ip });
@@ -79,8 +79,7 @@ export const handler: Handler = async (event) => {
 
       return jsonOk(200, requestId, data);
     } catch (err) {
-      // Only count invalid credential failures towards lockout.
-      if (identifier && isAppError(err) && err.code === "UNAUTHORIZED" && err.status === 401) {
+      if (identifier && isAppError(err) && err.status === 401) {
         await recordLoginFailure(LOCKOUT_POLICY, {
           identifier,
           ip: ctx.ip,
@@ -88,9 +87,11 @@ export const handler: Handler = async (event) => {
           userAgent: ctx.userAgent
         });
       }
+
       throw err;
     }
   } catch (err) {
     return toErrorResponse(requestId, err);
   }
 };
+

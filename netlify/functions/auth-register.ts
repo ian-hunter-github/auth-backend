@@ -46,9 +46,10 @@ export const handler: Handler = async (event) => {
       return jsonTooManyRequests(requestId, ipEmailLimit.retryAfterSeconds);
     }
 
-    const data = await register(req);
+    const data = await register(req, ctx);
     return jsonOk(201, requestId, data);
   } catch (err) {
     return toErrorResponse(requestId, err);
   }
 };
+

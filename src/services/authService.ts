@@ -1,3 +1,4 @@
+import type { RequestContext } from "../security/requestContext.js";
 import type {
   AuthLoginRequest,
   AuthLoginResponse,
@@ -32,20 +33,20 @@ function selectProvider(): AuthProvider {
   return postgresAuthProvider;
 }
 
-export async function login(req: AuthLoginRequest): Promise<AuthLoginResponse> {
-  return selectProvider().login(req);
+export async function login(req: AuthLoginRequest, ctx?: RequestContext): Promise<AuthLoginResponse> {
+  return selectProvider().login(req, ctx);
 }
 
-export async function register(req: AuthRegisterRequest): Promise<AuthRegisterResponse> {
-  return selectProvider().register(req);
+export async function register(req: AuthRegisterRequest, ctx?: RequestContext): Promise<AuthRegisterResponse> {
+  return selectProvider().register(req, ctx);
 }
 
-export async function refresh(req: AuthRefreshRequest): Promise<AuthRefreshResponse> {
-  return selectProvider().refresh(req);
+export async function refresh(req: AuthRefreshRequest, ctx?: RequestContext): Promise<AuthRefreshResponse> {
+  return selectProvider().refresh(req, ctx);
 }
 
-export async function logout(accessToken: string, req?: AuthLogoutRequest): Promise<void> {
-  return selectProvider().logout(accessToken, req);
+export async function logout(accessToken: string, req?: AuthLogoutRequest, ctx?: RequestContext): Promise<void> {
+  return selectProvider().logout(accessToken, req, ctx);
 }
 
 export async function getUserFromToken(token: string): Promise<AuthUserProfile> {

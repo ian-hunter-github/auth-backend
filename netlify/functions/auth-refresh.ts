@@ -27,9 +27,10 @@ export const handler: Handler = async (event) => {
     }
 
     const req = parseJsonBody<AuthRefreshRequest>(event.body);
-    const data = await refresh(req);
+    const data = await refresh(req, ctx);
     return jsonOk(200, requestId, data);
   } catch (err) {
     return toErrorResponse(requestId, err);
   }
 };
+

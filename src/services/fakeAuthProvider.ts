@@ -128,37 +128,41 @@ async function createSession(userId: string): Promise<{ refreshToken: string; ex
   const expiresAt = addMinutesIso(60);
 
   const store = await loadSessionStore();
-  store.sessionsByRefreshToken[refreshToken] = { userId, refreshToken, expiresAt };
+  store.sessionsByRefreshToken[refreshToken] = {
+    userId,
+    refreshToken,
+    expiresAt
+  };
   await saveSessionStore(store);
 
   return { refreshToken, expiresAt };
 }
 
+function isUuid(v: string): boolean {
+  const s = (v || "").trim();
+  if (!s) return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
+}
+
 function parseAccessToken(token: string): string {
   const t = (token || "").trim();
   if (!t) throw new AppError("Missing token", { code: "UNAUTHORIZED", status: 401 });
-
-  const prefix = "fake-access-token.";
-  if (!t.startsWith(prefix)) throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
-
-  const userId = t.slice(prefix.length);
+  if (!t.startsWith("fake-access-token.")) throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
+  const userId = t.slice("fake-access-token.".length);
   if (!userId) throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
-
+  if (!userId.startsWith("user_") && !isUuid(userId)) throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
   return userId;
 }
 
 function parseRefreshToken(token: string): { userId: string } {
   const t = (token || "").trim();
-  if (!t) throw new AppError("Missing refresh token", { code: "UNAUTHORIZED", status: 401 });
+  if (!t) throw new AppError("Invalid refresh token", { code: "UNAUTHORIZED", status: 401 });
 
-  const prefix = "fake-refresh-token.";
-  if (!t.startsWith(prefix)) throw new AppError("Invalid refresh token", { code: "UNAUTHORIZED", status: 401 });
+  const parts = t.split(".");
+  if (parts.length !== 3) throw new AppError("Invalid refresh token", { code: "UNAUTHORIZED", status: 401 });
+  if (parts[0] !== "fake-refresh-token") throw new AppError("Invalid refresh token", { code: "UNAUTHORIZED", status: 401 });
 
-  const rest = t.slice(prefix.length);
-  const dot = rest.indexOf(".");
-  if (dot <= 0) throw new AppError("Invalid refresh token", { code: "UNAUTHORIZED", status: 401 });
-
-  const userId = rest.slice(0, dot);
+  const userId = (parts[1] || "").trim();
   if (!userId) throw new AppError("Invalid refresh token", { code: "UNAUTHORIZED", status: 401 });
 
   return { userId };
@@ -167,9 +171,9 @@ function parseRefreshToken(token: string): { userId: string } {
 async function findUserByEmail(email: string): Promise<FakeUser | undefined> {
   await ensureSeedUsers();
   const store = await loadUserStore();
-  const target = email.trim().toLowerCase();
   for (const u of Object.values(store.usersById)) {
-    if (u.email.trim().toLowerCase() === target) return u;
+    if (!u) continue;
+    if ((u.email || "").toLowerCase() === email.toLowerCase()) return u;
   }
   return undefined;
 }
@@ -332,44 +336,26 @@ export const fakeAuthProvider: AuthProvider = {
       throw new AppError("Refresh token expired", { code: "UNAUTHORIZED", status: 401 });
     }
 
-    const u = await requireActiveUserById(parsed.userId);
-
-    // Rotate refresh token: revoke old + issue new
     existing.revokedAt = nowIso();
     store.sessionsByRefreshToken[refreshToken] = existing;
-
-    const next = await createSession(parsed.userId);
     await saveSessionStore(store);
 
-    return {
-      provider: "fake",
-      session: {
-        accessToken: accessTokenForUser(u.id),
-        tokenType: "bearer",
-        refreshToken: next.refreshToken,
-        expiresAt: next.expiresAt
-      },
-      user: {
-        id: u.id,
-        username: u.username,
-        displayName: u.displayName,
-        roles: u.roles
-      }
-    };
+    const u = await requireActiveUserById(parsed.userId);
+
+    const s = await createSession(u.id);
+    return toAuthResponse(u, s);
   },
 
   logout: async (accessToken: string, req?: AuthLogoutRequest): Promise<void> => {
     const userId = parseAccessToken(accessToken);
-    await requireUserById(userId);
-
-    const store = await loadSessionStore();
-
     const rt = (req?.refreshToken || "").trim();
+
     if (rt) {
-      const s = store.sessionsByRefreshToken[rt];
-      if (s && s.userId === userId && !s.revokedAt) {
-        s.revokedAt = nowIso();
-        store.sessionsByRefreshToken[rt] = s;
+      const store = await loadSessionStore();
+      const existing = store.sessionsByRefreshToken[rt];
+      if (existing && existing.userId === userId && !existing.revokedAt) {
+        existing.revokedAt = nowIso();
+        store.sessionsByRefreshToken[rt] = existing;
         await saveSessionStore(store);
       }
       return;
@@ -381,6 +367,7 @@ export const fakeAuthProvider: AuthProvider = {
   getUserFromToken: async (token: string): Promise<AuthUserProfile> => {
     const userId = parseAccessToken(token);
     const u = await requireActiveUserById(userId);
+
     return {
       id: u.id,
       username: u.username,
@@ -392,12 +379,15 @@ export const fakeAuthProvider: AuthProvider = {
   listUsers: async (): Promise<AuthUserProfile[]> => {
     await ensureSeedUsers();
     const store = await loadUserStore();
-    return Object.values(store.usersById).map((u) => ({
-      id: u.id,
-      username: u.username,
-      displayName: u.displayName,
-      roles: u.roles
-    }));
+
+    return Object.values(store.usersById)
+      .filter((u): u is FakeUser => !!u)
+      .map((u) => ({
+        id: u.id,
+        username: u.username,
+        displayName: u.displayName,
+        roles: u.roles
+      }));
   },
 
   getUserById: async (id: string): Promise<AuthUserProfile> => {
@@ -414,7 +404,6 @@ export const fakeAuthProvider: AuthProvider = {
     const email = (input.email || "").trim().toLowerCase();
     const password = input.password || "";
     const displayName = (input.displayName || "").trim();
-    const roles = normalizeRoles(input.roles);
 
     if (!email || !password) {
       throw new AppError("email and password are required", {
@@ -438,7 +427,7 @@ export const fakeAuthProvider: AuthProvider = {
       id,
       username: email,
       displayName: displayName || email,
-      roles,
+      roles: normalizeRoles(input.roles),
       email,
       password
     };
@@ -458,18 +447,19 @@ export const fakeAuthProvider: AuthProvider = {
     await ensureSeedUsers();
     const store = await loadUserStore();
 
+    const existing = store.usersById[id];
+    if (!existing) throw new AppError("Not found", { code: "NOT_FOUND", status: 404 });
+
+    store.usersById[id] = {
+      ...existing,
+      ...(typeof input.displayName === "string" ? { displayName: input.displayName } : {}),
+      ...(Array.isArray(input.roles) ? { roles: normalizeRoles(input.roles) } : {})
+    };
+
+    await saveUserStore(store);
+
     const u = store.usersById[id];
     if (!u) throw new AppError("Not found", { code: "NOT_FOUND", status: 404 });
-
-    if (input.displayName !== undefined) {
-      u.displayName = (input.displayName || "").trim();
-    }
-    if (input.roles !== undefined) {
-      u.roles = normalizeRoles(input.roles);
-    }
-
-    store.usersById[id] = u;
-    await saveUserStore(store);
 
     return {
       id: u.id,
@@ -483,15 +473,13 @@ export const fakeAuthProvider: AuthProvider = {
     await ensureSeedUsers();
     const store = await loadUserStore();
 
-    const u = store.usersById[id];
-    if (!u) throw new AppError("Not found", { code: "NOT_FOUND", status: 404 });
+    const existing = store.usersById[id];
+    if (!existing) throw new AppError("Not found", { code: "NOT_FOUND", status: 404 });
 
-    if (!u.deletedAt) {
-      u.deletedAt = nowIso();
-      store.usersById[id] = u;
-      await saveUserStore(store);
-      await revokeSessionsForUser(u.id);
-    }
+    store.usersById[id] = { ...existing, deletedAt: nowIso() };
+    await saveUserStore(store);
+
+    await revokeSessionsForUser(id);
   }
 };
 

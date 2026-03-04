@@ -1,3 +1,4 @@
+import type { RequestContext } from "../security/requestContext.js";
 import type {
   AuthLoginRequest,
   AuthLoginResponse,
@@ -22,10 +23,10 @@ export type UpdateUserInput = {
 };
 
 export type AuthProvider = {
-  login: (req: AuthLoginRequest) => Promise<AuthLoginResponse>;
-  register: (req: AuthRegisterRequest) => Promise<AuthRegisterResponse>;
-  refresh: (req: AuthRefreshRequest) => Promise<AuthRefreshResponse>;
-  logout: (accessToken: string, req?: AuthLogoutRequest) => Promise<void>;
+  login: (req: AuthLoginRequest, ctx?: RequestContext) => Promise<AuthLoginResponse>;
+  register: (req: AuthRegisterRequest, ctx?: RequestContext) => Promise<AuthRegisterResponse>;
+  refresh: (req: AuthRefreshRequest, ctx?: RequestContext) => Promise<AuthRefreshResponse>;
+  logout: (accessToken: string, req?: AuthLogoutRequest, ctx?: RequestContext) => Promise<void>;
   getUserFromToken: (token: string) => Promise<AuthUserProfile>;
 
   listUsers: () => Promise<AuthUserProfile[]>;
