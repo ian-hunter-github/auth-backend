@@ -11,6 +11,8 @@ type JwtPayload = {
   sub: string;
   iat: number;
   exp: number;
+  iss?: string;
+  aud?: string;
   jti: string;
 };
 
@@ -48,6 +50,26 @@ function hmacSha256(secret: Buffer, msg: string): string {
   return base64UrlEncode(sig);
 }
 
+function getIssuer(): string | undefined {
+  const v = (process.env.AUTH_JWT_ISSUER || "").trim();
+  return v.length > 0 ? v : undefined;
+}
+
+function getAudience(): string | undefined {
+  const v = (process.env.AUTH_JWT_AUDIENCE || "").trim();
+  return v.length > 0 ? v : undefined;
+}
+
+function getClockSkewSeconds(): number {
+  const raw = Number(process.env.AUTH_JWT_CLOCK_SKEW_SECONDS || "30");
+  return Number.isFinite(raw) && raw >= 0 ? raw : 30;
+}
+
+function getMaxTtlSeconds(): number {
+  const raw = Number(process.env.AUTH_JWT_MAX_TTL_SECONDS || "86400");
+  return Number.isFinite(raw) && raw > 0 ? raw : 86400;
+}
+
 export function signAccessToken(
   userId: string,
   opts?: { ttlSeconds?: number; now?: Date }
@@ -58,7 +80,18 @@ export function signAccessToken(
   const exp = iat + (Number.isFinite(ttlSeconds) && ttlSeconds > 0 ? ttlSeconds : 900);
 
   const header: JwtHeader = { alg: "HS256", typ: "JWT" };
-  const payload: JwtPayload = { sub: userId, iat, exp, jti: crypto.randomUUID() };
+
+  const issuer = getIssuer();
+  const audience = getAudience();
+
+  const payload: JwtPayload = {
+    sub: userId,
+    iat,
+    exp,
+    jti: crypto.randomUUID(),
+    ...(issuer ? { iss: issuer } : {}),
+    ...(audience ? { aud: audience } : {})
+  };
 
   const headerPart = base64UrlEncode(Buffer.from(JSON.stringify(header), "utf8"));
   const payloadPart = base64UrlEncode(Buffer.from(JSON.stringify(payload), "utf8"));
@@ -76,7 +109,7 @@ export function signAccessToken(
 export function verifyAccessToken(
   token: string,
   opts?: { now?: Date; clockSkewSeconds?: number }
-): { userId: string; iat: number; exp: number } {
+): { userId: string; iat: number; exp: number; jti: string } {
   const t = (token || "").trim();
   if (!t) {
     throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
@@ -109,7 +142,13 @@ export function verifyAccessToken(
     throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
   }
 
-  if (!payload || typeof payload.sub !== "string" || typeof payload.iat !== "number" || typeof payload.exp !== "number" || typeof payload.jti !== "string") {
+  if (
+    !payload ||
+    typeof payload.sub !== "string" ||
+    typeof payload.iat !== "number" ||
+    typeof payload.exp !== "number" ||
+    typeof payload.jti !== "string"
+  ) {
     throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
   }
 
@@ -121,12 +160,40 @@ export function verifyAccessToken(
   }
 
   const now = opts?.now ?? new Date();
-  const skew = opts?.clockSkewSeconds ?? Number(process.env.AUTH_JWT_CLOCK_SKEW_SECONDS || "30");
+  const skew = opts?.clockSkewSeconds ?? getClockSkewSeconds();
   const nowSec = Math.floor(now.getTime() / 1000);
 
-  if (nowSec > payload.exp + (Number.isFinite(skew) && skew >= 0 ? skew : 30)) {
+  // exp must be strictly after iat
+  if (!(payload.exp > payload.iat)) {
     throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
   }
 
-  return { userId: payload.sub, iat: payload.iat, exp: payload.exp };
+  // Reject tokens issued "in the future" beyond allowed clock skew.
+  if (payload.iat > nowSec + skew) {
+    throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
+  }
+
+  // Enforce max TTL (defense in depth).
+  const maxTtl = getMaxTtlSeconds();
+  if (payload.exp - payload.iat > maxTtl) {
+    throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
+  }
+
+  const issuer = getIssuer();
+  const audience = getAudience();
+
+  if (issuer && payload.iss !== issuer) {
+    throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
+  }
+
+  if (audience && payload.aud !== audience) {
+    throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
+  }
+
+  if (nowSec > payload.exp + skew) {
+    throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
+  }
+
+  return { userId: payload.sub, iat: payload.iat, exp: payload.exp, jti: payload.jti };
 }
+

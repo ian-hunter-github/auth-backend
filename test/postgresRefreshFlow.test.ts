@@ -127,8 +127,8 @@ suite("postgres refresh flow (RUN_PG_TESTS=1)", () => {
     const access2 = refreshBody.data.session.accessToken;
     const refresh2 = refreshBody.data.session.refreshToken as string;
 
-    // Access tokens are deterministic in the current postgres provider (prefix + userId).
-    expect(access2).toBe(access1);
+    // Postgres provider now issues signed JWT access tokens; these may rotate on refresh.
+    expect(access2).not.toBe(access1);
     // Refresh tokens must rotate.
     expect(refresh2).not.toBe(refresh1);
 
