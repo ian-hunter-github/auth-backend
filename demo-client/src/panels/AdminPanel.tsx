@@ -5,8 +5,10 @@ import {
   Button,
   Chip,
   Divider,
+  FormControlLabel,
   Paper,
   Stack,
+  Switch,
   Typography
 } from "@mui/material";
 import { useAuth } from "../auth/useAuth";
@@ -17,9 +19,13 @@ import type { AuthUserProfile } from "../types/authTypes";
 import { AdminUsersTable } from "../features/adminUsers/AdminUsersTable";
 import { AdminUserFormModal } from "../features/adminUsers/AdminUserFormModal";
 import type { AdminCreateUserRequest, AdminUpdateUserRequest } from "../types/adminUsersTypes";
+import { useDebug } from "../debug/DebugContext";
+import { DebugLogViewer } from "../components/DebugLogViewer";
+import { getFunctionsBaseUrl } from "../config";
 
 export function AdminPanel() {
   const auth = useAuth();
+  const dbg = useDebug();
   const { adminApi } = usePanelApis();
 
   const [loginOpen, setLoginOpen] = useState(false);
@@ -46,7 +52,6 @@ export function AdminPanel() {
   useEffect(() => {
     if (auth.isLoggedIn) void loadUsers();
     if (!auth.isLoggedIn) setUsers([]);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auth.isLoggedIn]);
 
   async function doLogin(username: string, password: string) {
@@ -99,6 +104,9 @@ export function AdminPanel() {
         <Typography variant="body2" color="text.secondary">
           Independent session: <code>auth.admin.*</code>
         </Typography>
+        <Typography variant="caption" color="text.secondary">
+          Functions base: <code>{getFunctionsBaseUrl()}</code>
+        </Typography>
       </Box>
 
       <Stack direction="row" spacing={1} alignItems="center" sx={{ flexWrap: "wrap" }}>
@@ -109,6 +117,12 @@ export function AdminPanel() {
         )}
         {auth.user?.username ? <Chip label={auth.user.username} size="small" /> : null}
         {auth.user?.roles?.length ? <Chip label={(auth.user.roles || []).join(", ")} size="small" /> : null}
+
+        <FormControlLabel
+          control={<Switch size="small" checked={dbg.enabled} onChange={(e) => dbg.setEnabled(e.target.checked)} />}
+          label="Debug"
+          sx={{ ml: 0.5 }}
+        />
 
         <Box sx={{ flex: 1 }} />
 
@@ -131,9 +145,11 @@ export function AdminPanel() {
         )}
       </Stack>
 
-      <Box sx={{ minHeight: 0, display: "grid", gridTemplateRows: "auto auto 1fr", gap: 1 }}>
+      <Box sx={{ minHeight: 0, display: "grid", gridTemplateRows: "auto auto auto 1fr", gap: 1 }}>
         {auth.lastError ? <Alert severity="error">{`${auth.lastError.code}: ${auth.lastError.message}`}</Alert> : null}
         {panelError ? <Alert severity="error">{`${panelError.code}: ${panelError.message}`}</Alert> : null}
+
+        <DebugLogViewer />
 
         <Divider />
 
@@ -149,14 +165,24 @@ export function AdminPanel() {
               <Typography variant="subtitle1" sx={{ flex: 1 }}>
                 Users
               </Typography>
-              <Button variant="contained" onClick={() => { setFormError(undefined); setCreateOpen(true); }} disabled={!isAdmin}>
+              <Button
+                variant="contained"
+                onClick={() => {
+                  setFormError(undefined);
+                  setCreateOpen(true);
+                }}
+                disabled={!isAdmin}
+              >
                 Create user
               </Button>
             </Stack>
 
             <AdminUsersTable
               users={users}
-              onEdit={(u) => { setFormError(undefined); setEditUser(u); }}
+              onEdit={(u) => {
+                setFormError(undefined);
+                setEditUser(u);
+              }}
               onDelete={(u) => void doDelete(u)}
             />
           </Box>

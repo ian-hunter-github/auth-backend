@@ -1,5 +1,4 @@
 import { getFunctionsBaseUrl } from "../config";
-import type { Envelope } from "../types/apiTypes";
 import { isErrorEnvelope, isSuccessEnvelope } from "../types/apiTypes";
 
 export type ApiError = {
@@ -10,13 +9,29 @@ export type ApiError = {
   requestId?: string;
 };
 
+export type ApiLogEntry = {
+  method: string;
+  path: string;
+  url: string;
+  status: number;
+  ms: number;
+  ok: boolean;
+  requestBody?: unknown;
+  responseBody?: unknown;
+  errorMessage?: string;
+};
+
+export type ApiLogger = (e: ApiLogEntry) => void;
+
+type FetchInit = Parameters<typeof fetch>[1];
+
 export type ApiClient = {
   get<T>(path: string, opts?: { headers?: Record<string, string> }): Promise<T>;
   post<T>(path: string, body?: unknown, opts?: { headers?: Record<string, string> }): Promise<T>;
   patch<T>(path: string, body?: unknown, opts?: { headers?: Record<string, string> }): Promise<T>;
   del<T>(path: string, opts?: { headers?: Record<string, string> }): Promise<T>;
   raw: {
-    request(method: string, path: string, init?: RequestInit): Promise<Response>;
+    request(method: string, path: string, init?: FetchInit): Promise<Response>;
   };
 };
 
@@ -64,10 +79,10 @@ function unwrapEnvelope<T>(status: number, body: unknown): T {
   return body as T;
 }
 
-export function createApiClient(getAccessToken: () => string | undefined): ApiClient {
+export function createApiClient(getAccessToken: () => string | undefined, logger?: ApiLogger): ApiClient {
   const baseUrl = getFunctionsBaseUrl();
 
-  async function request(method: string, path: string, init?: RequestInit): Promise<Response> {
+  async function request(method: string, path: string, init?: FetchInit): Promise<Response> {
     const url = joinUrl(baseUrl, path);
     const headers: Record<string, string> = {
       ...(init?.headers ? (init.headers as Record<string, string>) : {})
@@ -96,17 +111,65 @@ export function createApiClient(getAccessToken: () => string | undefined): ApiCl
       payload = JSON.stringify(body);
     }
 
-    const res = await request(method, path, {
-      headers,
-      ...(payload !== undefined ? { body: payload } : {})
-    });
+    const started = performance.now();
+    const url = joinUrl(baseUrl, path);
 
-    const parsed = await readJsonSafe(res);
+    try {
+      const res = await request(method, path, {
+        headers,
+        ...(payload !== undefined ? { body: payload } : {})
+      });
 
-    if (!res.ok) throw toApiError(res.status, parsed);
+      const parsed = await readJsonSafe(res);
+      const ms = Math.max(0, Math.round(performance.now() - started));
 
-    // If response is 204, parsed will be null; return as any.
-    return unwrapEnvelope<T>(res.status, parsed) as T;
+      if (!res.ok) {
+        logger?.({
+          method,
+          path,
+          url,
+          status: res.status,
+          ms,
+          ok: false,
+          requestBody: body,
+          responseBody: parsed
+        });
+
+        throw toApiError(res.status, parsed);
+      }
+
+      logger?.({
+        method,
+        path,
+        url,
+        status: res.status,
+        ms,
+        ok: true,
+        requestBody: body,
+        responseBody: parsed
+      });
+
+      // If response is 204, parsed will be null; return as any.
+      return unwrapEnvelope<T>(res.status, parsed) as T;
+    } catch (err) {
+      const ms = Math.max(0, Math.round(performance.now() - started));
+
+      if ((err as { status?: unknown })?.status === undefined) {
+        logger?.({
+          method,
+          path,
+          url,
+          status: 0,
+          ms,
+          ok: false,
+          requestBody: body,
+          responseBody: null,
+          errorMessage: err instanceof Error ? err.message : String(err)
+        });
+      }
+
+      throw err;
+    }
   }
 
   return {

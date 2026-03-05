@@ -28,7 +28,12 @@ function baseHeaders(requestId: string): Record<string, string> {
     "referrer-policy": "no-referrer",
     "content-security-policy": "default-src 'none'",
     "permissions-policy": "geolocation=(), microphone=(), camera=()",
-    "strict-transport-security": "max-age=63072000; includeSubDomains; preload"
+    "strict-transport-security": "max-age=63072000; includeSubDomains; preload",
+    "access-control-allow-origin": "*",
+    "access-control-allow-methods": "GET,POST,PATCH,DELETE,OPTIONS",
+    "access-control-allow-headers": "authorization, content-type, x-request-id, x-correlation-id",
+    "access-control-expose-headers": "x-request-id, retry-after",
+    "access-control-max-age": "86400"
   };
 }
 
@@ -47,6 +52,16 @@ function jsonOk<T>(statusCode: number, requestId: string, data: T): HandlerRespo
 export function jsonNoContent(statusCode: number, requestId: string): HandlerResponse {
   return {
     statusCode,
+    headers: {
+      ...baseHeaders(requestId)
+    },
+    body: ""
+  };
+}
+
+export function jsonCorsPreflight(requestId: string): HandlerResponse {
+  return {
+    statusCode: 204,
     headers: {
       ...baseHeaders(requestId)
     },
@@ -121,4 +136,3 @@ export function requireMethod(actual: string | undefined, allowed: string[]) {
 }
 
 export { jsonOk };
-

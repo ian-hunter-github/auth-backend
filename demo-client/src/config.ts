@@ -1,8 +1,12 @@
 export function getApiBaseUrl(): string {
-  const raw = (import.meta as any).env?.VITE_API_BASE_URL as string | undefined;
+  const raw = import.meta.env.VITE_API_BASE_URL;
   const v = (raw || "").trim();
-  // Default matches repo smoke/local patterns (Netlify dev commonly on 3999).
-  return v || "http://localhost:3999";
+
+  // If not explicitly set, default to same-origin. In local dev, Vite proxies
+  // "/.netlify/functions/*" to the backend (see vite.config.ts) to avoid CORS.
+  if (!v) return window.location.origin;
+
+  return v;
 }
 
 export function getFunctionsBaseUrl(): string {

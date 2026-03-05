@@ -3,19 +3,24 @@ import { AuthProvider } from "../auth/AuthContext";
 import { SplitLayout } from "../components/SplitLayout";
 import { AdminPanel } from "../panels/AdminPanel";
 import { UserPanel } from "../panels/UserPanel";
+import { DebugProvider } from "../debug/DebugContext";
 
 export function DemoPage() {
   return (
     <SplitLayout
       left={
-        <AuthProvider sessionKey="admin">
-          <AdminPanel />
-        </AuthProvider>
+        <DebugProvider sessionKey="admin">
+          <AuthProvider sessionKey="admin">
+            <AdminPanel />
+          </AuthProvider>
+        </DebugProvider>
       }
       right={
-        <AuthProvider sessionKey="user">
-          <UserPanel />
-        </AuthProvider>
+        <DebugProvider sessionKey="user">
+          <AuthProvider sessionKey="user">
+            <UserPanel />
+          </AuthProvider>
+        </DebugProvider>
       }
     />
   );

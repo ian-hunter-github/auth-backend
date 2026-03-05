@@ -1,14 +1,29 @@
 import React, { useEffect, useState } from "react";
-import { Alert, Box, Button, Chip, Divider, Paper, Stack, Typography } from "@mui/material";
+import {
+  Alert,
+  Box,
+  Button,
+  Chip,
+  Divider,
+  FormControlLabel,
+  Paper,
+  Stack,
+  Switch,
+  Typography
+} from "@mui/material";
 import { useAuth } from "../auth/useAuth";
 import { LoginModal } from "../components/LoginModal";
 import { JsonViewer } from "../components/JsonViewer";
 import { usePanelApis } from "../hooks/useApi";
 import type { ApiError } from "../api/apiClient";
 import type { MeResponse } from "../types/meTypes";
+import { useDebug } from "../debug/DebugContext";
+import { DebugLogViewer } from "../components/DebugLogViewer";
+import { getFunctionsBaseUrl } from "../config";
 
 export function UserPanel() {
   const auth = useAuth();
+  const dbg = useDebug();
   const { userApi } = usePanelApis();
 
   const [loginOpen, setLoginOpen] = useState(false);
@@ -45,6 +60,9 @@ export function UserPanel() {
         <Typography variant="body2" color="text.secondary">
           Independent session: <code>auth.user.*</code>
         </Typography>
+        <Typography variant="caption" color="text.secondary">
+          Functions base: <code>{getFunctionsBaseUrl()}</code>
+        </Typography>
       </Box>
 
       <Stack direction="row" spacing={1} alignItems="center" sx={{ flexWrap: "wrap" }}>
@@ -55,6 +73,12 @@ export function UserPanel() {
         )}
         {auth.user?.username ? <Chip label={auth.user.username} size="small" /> : null}
         {auth.user?.roles?.length ? <Chip label={(auth.user.roles || []).join(", ")} size="small" /> : null}
+
+        <FormControlLabel
+          control={<Switch size="small" checked={dbg.enabled} onChange={(e) => dbg.setEnabled(e.target.checked)} />}
+          label="Debug"
+          sx={{ ml: 0.5 }}
+        />
 
         <Box sx={{ flex: 1 }} />
 
@@ -77,9 +101,11 @@ export function UserPanel() {
         )}
       </Stack>
 
-      <Box sx={{ minHeight: 0, display: "grid", gridTemplateRows: "auto auto 1fr", gap: 1 }}>
+      <Box sx={{ minHeight: 0, display: "grid", gridTemplateRows: "auto auto auto 1fr", gap: 1 }}>
         {auth.lastError ? <Alert severity="error">{`${auth.lastError.code}: ${auth.lastError.message}`}</Alert> : null}
         {panelError ? <Alert severity="error">{`${panelError.code}: ${panelError.message}`}</Alert> : null}
+
+        <DebugLogViewer />
 
         <Divider />
 

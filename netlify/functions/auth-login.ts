@@ -2,7 +2,7 @@ import type { Handler } from "@netlify/functions";
 import { getOrCreateRequestId } from "../../src/lib/requestId.js";
 import { parseJsonBody } from "../../src/lib/body.js";
 import { isAppError } from "../../src/lib/errors.js";
-import { jsonOk, jsonTooManyRequests, requireMethod, toErrorResponse } from "../../src/lib/response.js";
+import { jsonCorsPreflight, jsonOk, jsonTooManyRequests, requireMethod, toErrorResponse } from "../../src/lib/response.js";
 import type { AuthLoginRequest } from "../../src/contracts/auth.js";
 import { login } from "../../src/services/authService.js";
 import { buildRequestContext } from "../../src/security/requestContext.js";
@@ -39,6 +39,10 @@ export const handler: Handler = async (event) => {
   const ctx = buildRequestContext(event, requestId);
 
   try {
+    if ((event.httpMethod || "").toUpperCase() === "OPTIONS") {
+      return jsonCorsPreflight(requestId);
+    }
+
     requireMethod(event.httpMethod, ["POST"]);
 
     // Parse early so we can rate-limit and lock out by identifier.
@@ -94,4 +98,3 @@ export const handler: Handler = async (event) => {
     return toErrorResponse(requestId, err);
   }
 };
-

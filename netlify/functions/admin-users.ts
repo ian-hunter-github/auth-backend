@@ -4,6 +4,7 @@ import { parseJsonBody } from "../../src/lib/body.js";
 import { getBearerToken } from "../../src/lib/authHeader.js";
 import {
   jsonBadRequest,
+  jsonCorsPreflight,
   jsonMethodNotAllowed,
   jsonNoContent,
   jsonOk,
@@ -36,6 +37,10 @@ function getIdFromPath(pathname: string | undefined): string | undefined {
 export const handler: Handler = async (event) => {
   const requestId = getOrCreateRequestId(event.headers || {});
   try {
+    if ((event.httpMethod || "").toUpperCase() === "OPTIONS") {
+      return jsonCorsPreflight(requestId);
+    }
+
     requireMethod(event.httpMethod, ["GET", "POST", "PATCH", "DELETE"]);
 
     const token = getBearerToken(event.headers || {});
@@ -79,4 +84,3 @@ export const handler: Handler = async (event) => {
     return toErrorResponse(requestId, err);
   }
 };
-

@@ -4,6 +4,7 @@ import { makeAuthApi } from "../api/authApi";
 import type { ApiError } from "../api/apiClient";
 import type { AuthSession, AuthUserProfile } from "../types/authTypes";
 import { clearAuth, loadAuth, saveAuth } from "./tokenStore";
+import { useDebug } from "../debug/DebugContext";
 
 export type AuthState = {
   sessionKey: string;
@@ -25,6 +26,7 @@ const AuthContext = createContext<AuthState | null>(null);
 
 export function AuthProvider(props: { sessionKey: string; children: React.ReactNode }) {
   const { sessionKey } = props;
+  const dbg = useDebug();
 
   const [session, setSession] = useState<AuthSession | undefined>(undefined);
   const [user, setUser] = useState<AuthUserProfile | undefined>(undefined);
@@ -41,7 +43,28 @@ export function AuthProvider(props: { sessionKey: string; children: React.ReactN
     saveAuth(sessionKey, { ...(session ? { session } : {}), ...(user ? { user } : {}) });
   }, [sessionKey, session, user]);
 
-  const api = useMemo(() => createApiClient(() => session?.accessToken), [session?.accessToken]);
+  const api = useMemo(
+    () =>
+      createApiClient(
+        () => session?.accessToken,
+        dbg.enabled
+          ? (e) =>
+              dbg.log({
+                method: e.method,
+                path: e.path,
+                url: e.url,
+                status: e.status,
+                ms: e.ms,
+                ok: e.ok,
+                requestBody: e.requestBody,
+                responseBody: e.responseBody,
+                errorMessage: e.errorMessage
+              })
+          : undefined
+      ),
+    [session?.accessToken, dbg.enabled, dbg]
+  );
+
   const authApi = useMemo(() => makeAuthApi(api), [api]);
 
   const clearLocal = useCallback(() => {

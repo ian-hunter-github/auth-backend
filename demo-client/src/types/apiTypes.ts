@@ -16,14 +16,28 @@ export type ErrorEnvelope = {
 
 export type Envelope<T> = SuccessEnvelope<T> | ErrorEnvelope;
 
+type UnknownRecord = Record<string, unknown>;
+
+function isRecord(v: unknown): v is UnknownRecord {
+  return typeof v === "object" && v !== null;
+}
+
 export function isSuccessEnvelope<T>(v: unknown): v is SuccessEnvelope<T> {
-  if (!v || typeof v !== "object") return false;
-  const o = v as any;
-  return o.ok === true && "data" in o;
+  if (!isRecord(v)) return false;
+  return v.ok === true && "data" in v;
 }
 
 export function isErrorEnvelope(v: unknown): v is ErrorEnvelope {
-  if (!v || typeof v !== "object") return false;
-  const o = v as any;
-  return o.ok === false && !!o.error && typeof o.error.code === "string";
+  if (!isRecord(v)) return false;
+
+  const ok = v.ok;
+  const err = v.error;
+
+  if (ok !== false) return false;
+  if (!isRecord(err)) return false;
+
+  const code = err.code;
+  const message = err.message;
+
+  return typeof code === "string" && typeof message === "string";
 }
