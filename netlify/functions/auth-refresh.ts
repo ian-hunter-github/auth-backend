@@ -6,6 +6,7 @@ import type { AuthRefreshRequest } from "../../src/contracts/auth.js";
 import { refresh } from "../../src/services/authService.js";
 import { buildRequestContext } from "../../src/security/requestContext.js";
 import { checkRateLimit, rateKeyFromContext } from "../../src/security/rateLimiter.js";
+import { writeAuditLog } from "../../src/services/auditLogService.js";
 
 const REFRESH_IP_POLICY = {
   bucketSeconds: 60,
@@ -28,6 +29,21 @@ export const handler: Handler = async (event) => {
 
     const req = parseJsonBody<AuthRefreshRequest>(event.body);
     const data = await refresh(req);
+
+    if (data.provider === "postgres") {
+      await writeAuditLog({
+        action: "auth.refresh.rotated",
+        actorUserId: data.user.id,
+        targetUserId: data.user.id,
+        requestId,
+        ip: ctx.ip,
+        userAgent: ctx.userAgent,
+        details: {
+          provider: data.provider
+        }
+      });
+    }
+
     return jsonOk(200, requestId, data);
   } catch (err) {
     return toErrorResponse(requestId, err);

@@ -1,13 +1,13 @@
-import { getEnv } from "../lib/env.js";
 import type { HealthResponse } from "../contracts/health.js";
+import { getEnv } from "../lib/env.js";
 
 function has(name: string): boolean {
-  const v = getEnv(name);
-  return !!v;
+  return !!getEnv(name);
 }
 
 export function getHealth(): HealthResponse {
   const authProvider = getEnv("AUTH_PROVIDER");
+
   const context = getEnv("CONTEXT");
   const deployId = getEnv("DEPLOY_ID");
   const siteId = getEnv("SITE_ID");

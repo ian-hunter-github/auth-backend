@@ -1,0 +1,36 @@
+Identity Backend Service (Netlify Functions + Postgres)
+
++-------------------+                         +-----------------------------+
+| Client / Curl /   |  HTTPS                  | Netlify Site / Functions    |
+| App (trusted UI)  +------------------------>+  /.netlify/functions/*      |
++---------+---------+                         +--------------+--------------+
+          |                                                   |
+          | Authorization: Bearer <access token>              |
+          |                                                   |
+          v                                                   v
++-------------------+                         +-----------------------------+
+| auth-login         |  validate creds        | src/services/*              |
+| auth-refresh       +----------------------->| - authService               |
+| auth-logout        |                         | - postgresAuthProvider      |
+| me                 |                         | - fakeAuthProvider          |
+| admin-users        |                         | - adminUsersService         |
+| health             |                         | - healthService             |
+| health-admin       |  ADMIN-only details     | - healthAdminService        |
++-------------------+                         +--------------+--------------+
+                                                             |
+                                                             | pg.Pool
+                                                             v
+                                                +-----------------------------+
+                                                | Neon Postgres               |
+                                                | schema: identity            |
+                                                | - users                     |
+                                                | - sessions                  |
+                                                | - audit_log                 |
+                                                | - login_failures / lockouts |
+                                                +-----------------------------+
+
+Notes:
+- /health is safe for public use (booleans + basic diagnostics).
+- /health-admin is protected (admin bearer token) and may reveal more config detail.
+- Passwords and secrets must never be returned; prefer fingerprints + masked values.
+

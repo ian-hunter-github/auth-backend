@@ -86,23 +86,34 @@ echo "$raw" | node -e '
   let j;
   try { j = JSON.parse(raw); } catch (e) { console.error("ERROR: invalid JSON"); process.exit(1); }
   console.log(JSON.stringify(j, null, 2));
+'
 
-  const env = j && j.data && j.data.env ? j.data.env : undefined;
-  const requestId = j && typeof j === "object" ? (j.requestId ?? "<none>") : "<none>";
-  const ok = j && typeof j === "object" ? (j.ok ?? "<unknown>") : "<unknown>";
+# Add a concise human summary after JSON, without extra dependencies.
+echo ""
+echo "Summary:"
+echo "$raw" | node -e '
+  const fs = require("fs");
+  const raw = fs.readFileSync(0, "utf8").trim();
+  let j;
+  try { j = JSON.parse(raw); } catch { process.exit(0); }
 
-  const authProvider = env && env.authProvider ? env.authProvider : "<unset>";
-  const pg = env && env.postgres ? env.postgres : {};
-  const nodeVer = j && j.data && j.data.build && j.data.build.node ? j.data.build.node : "<unknown>";
+  const ok = j && typeof j === "object" ? j.ok : undefined;
+  const rid = j && typeof j === "object" ? j.requestId : undefined;
+  const data = j && typeof j === "object" ? j.data : undefined;
 
-  const yesno = (b) => (b ? "yes" : "no");
-  console.log("");
-  console.log("Summary:");
-  console.log(`  ok        : ${ok}`);
-  console.log(`  requestId : ${requestId}`);
+  function b(v) { return v ? "yes" : "no"; }
+
+  const d = (data && typeof data === "object") ? data : {};
+  const env = (d.env && typeof d.env === "object") ? d.env : {};
+  const pg = (env.postgres && typeof env.postgres === "object") ? env.postgres : {};
+
+  const authProvider = env.authProvider ?? "<unset>";
+  const nodeVer = d.build && d.build.node ? d.build.node : "<unknown>";
+
+  console.log(`  ok        : ${ok === true ? "true" : ok === false ? "false" : "<unknown>"}`);
+  if (rid) console.log(`  requestId : ${rid}`);
   console.log(`  node      : ${nodeVer}`);
   console.log(`  provider  : ${authProvider}`);
-  console.log(
-    `  postgres  : host=${yesno(pg.hasHost)} db=${yesno(pg.hasDatabase)} user=${yesno(pg.hasUser)} pass=${yesno(pg.hasPassword)} port=${yesno(pg.hasPort)} sslmode=${yesno(pg.hasSslMode)}`
-  );
+  console.log(`  postgres  : host=${b(pg.hasHost)} db=${b(pg.hasDatabase)} user=${b(pg.hasUser)} pass=${b(pg.hasPassword)} port=${b(pg.hasPort)} sslmode=${b(pg.hasSslMode)}`);
 '
+
