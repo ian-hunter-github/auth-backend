@@ -11,7 +11,8 @@ create table if not exists identity.users (
   password_salt text not null,
   password_hash text not null,
   deleted_at timestamptz null,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
 );
 
 -- Backward/forward compatible guards (for DBs created with older ddl.sql)
@@ -24,6 +25,9 @@ alter table identity.users
 alter table identity.users
   add column if not exists created_at timestamptz not null default now();
 
+alter table identity.users
+  add column if not exists updated_at timestamptz not null default now();
+
 create index if not exists idx_identity_users_deleted_at on identity.users(deleted_at);
 
 -- Refresh token sessions (hashed-at-rest)
@@ -35,24 +39,6 @@ create table if not exists identity.sessions (
   expires_at timestamptz not null,
   revoked_at timestamptz null
 );
-
-create table if not exists identity.external_identities (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references identity.users(id) on delete cascade,
-
-  provider text not null,                 -- e.g. 'google', 'github'
-  provider_user_id text not null,         -- e.g. OIDC 'sub'
-
-  email text null,                        -- provider email (optional)
-  email_verified boolean null,            -- provider assertion (optional)
-
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-
-  unique (provider, provider_user_id)
-);
-
-create index if not exists external_identities_user_id_idx on identity.external_identities(user_id);
 
 create index if not exists idx_identity_sessions_user_id on identity.sessions(user_id);
 create index if not exists idx_identity_sessions_expires_at on identity.sessions(expires_at);
@@ -135,4 +121,3 @@ create index if not exists idx_identity_auth_failures_locked_until
 
 create index if not exists idx_identity_auth_failures_last_failure_at
   on identity.auth_failures(last_failure_at);
-
