@@ -77,24 +77,35 @@ export async function startNetlifyDev(): Promise<Harness> {
 
   const staticPort = await pickPort(staticPreferred, { exclude: new Set([proxyPort]) });
 
-  const cmd = process.platform === "win32" ? "bash.exe" : "bash";
-  const args = [
-    "scripts/netlify-dev.sh",
-    "--offline",
-    "--no-open",
-    "--port",
-    String(proxyPort),
-    "--staticServerPort",
-    String(staticPort)
-  ];
+  const isWindows = process.platform === "win32";
 
-  const isCi = (process.env.CI || "").toLowerCase() === "true";
+  const cmd = isWindows ? (process.platform === "win32" ? "npx.cmd" : "npx") : "bash";
+  const args = isWindows
+    ? [
+        "netlify",
+        "dev",
+        "--offline",
+        "--no-open",
+        "--port",
+        String(proxyPort),
+        "--staticServerPort",
+        String(staticPort)
+      ]
+    : [
+        "scripts/netlify-dev.sh",
+        "--offline",
+        "--no-open",
+        "--port",
+        String(proxyPort),
+        "--staticServerPort",
+        String(staticPort)
+      ];
 
   // IMPORTANT:
-  // - Local runs keep stdio ignored to avoid PIPEWRAP/FILEHANDLE handles keeping Vitest alive.
-  // - CI runs inherit stdio so failures are diagnosable (and cold-cache starts can take longer).
+  // Using stdio: "ignore" prevents PIPEWRAP/FILEHANDLE handles from keeping Vitest alive.
+  // We rely on health polling for readiness and return a helpful error message on failure.
   const child = spawn(cmd, args, {
-    stdio: isCi ? "inherit" : "ignore",
+    stdio: "ignore",
     detached: process.platform !== "win32",
     env: {
       ...process.env,
@@ -110,12 +121,17 @@ export async function startNetlifyDev(): Promise<Harness> {
   const baseUrl = `http://localhost:${proxyPort}`;
 
   try {
-    await waitForHealthy(baseUrl, isCi ? 240000 : 90000);
+    await waitForHealthy(baseUrl, 90000);
   } catch (err) {
     killProcessTree(child.pid ?? 0, "SIGTERM");
     const original = err instanceof Error ? err.message : String(err);
+
+    const tip = isWindows
+      ? `npx netlify dev --offline --no-open --port ${proxyPort} --staticServerPort ${staticPort}`
+      : `bash scripts/netlify-dev.sh --offline --no-open --port ${proxyPort} --staticServerPort ${staticPort}`;
+
     throw new Error(
-      `Failed to start netlify dev.\n\nBase URL: ${baseUrl}\nProxy port: ${proxyPort}\nStatic port: ${staticPort}\n\nOriginal error: ${original}\n\nTip: run manually for logs:\n  bash scripts/netlify-dev.sh --offline --no-open --port ${proxyPort} --staticServerPort ${staticPort}\n`
+      `Failed to start netlify dev.\n\nBase URL: ${baseUrl}\nProxy port: ${proxyPort}\nStatic port: ${staticPort}\n\nOriginal error: ${original}\n\nTip: run manually for logs:\n  ${tip}\n`
     );
   }
 
@@ -139,4 +155,3 @@ export async function startNetlifyDev(): Promise<Harness> {
     }
   };
 }
-
