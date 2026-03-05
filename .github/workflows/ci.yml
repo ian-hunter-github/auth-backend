@@ -5,6 +5,22 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      run_deploy:
+        description: "Run deploy job (only applies on main)"
+        required: false
+        default: "false"
+      debug:
+        description: "Enable extra diagnostics output"
+        required: false
+        default: "false"
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   test:
@@ -12,11 +28,28 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: "npm"
-      - run: npm ci
+
+      - name: Debug info
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.debug == 'true' }}
+        run: |
+          set -euo pipefail
+          echo "event=${GITHUB_EVENT_NAME}"
+          echo "ref=${GITHUB_REF}"
+          echo "sha=${GITHUB_SHA}"
+          echo "actor=${GITHUB_ACTOR}"
+          node --version
+          npm --version
+          echo "runner.os=${RUNNER_OS}"
+          echo "runner.arch=${RUNNER_ARCH}"
+          echo "pwd=$(pwd)"
+          ls -la
+
+      - run: npm ci --no-audit --prefer-offline
       - run: npm run lint
       - run: npm run typecheck
       - run: npm run test:run
@@ -24,20 +57,23 @@ jobs:
           NETLIFY_DEV_PORT: "3999"
 
   deploy:
-    if: github.ref == 'refs/heads/main'
+    if: >
+      github.ref == 'refs/heads/main' &&
+      (github.event_name != 'workflow_dispatch' || inputs.run_deploy == 'true')
     needs: [test]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: "npm"
-      - run: npm ci
+
+      - run: npm ci --no-audit --prefer-offline
       - run: npm run build
       - run: npx netlify deploy --prod --dir=. --site "$NETLIFY_SITE_ID" --auth "$NETLIFY_AUTH_TOKEN"
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
-
