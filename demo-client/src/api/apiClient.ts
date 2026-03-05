@@ -71,9 +71,6 @@ function toApiError(status: number, body: unknown): ApiError {
 }
 
 function unwrapEnvelope<T>(status: number, body: unknown): T {
-  // Supports both:
-  // 1) { ok: true, data: <T> }
-  // 2) direct payload <T> (some endpoints/tools)
   if (isSuccessEnvelope<T>(body)) return body.data;
   if (isErrorEnvelope(body)) throw toApiError(status, body);
   return body as T;
@@ -91,16 +88,19 @@ export function createApiClient(getAccessToken: () => string | undefined, logger
     const token = getAccessToken();
     if (token) headers.authorization = `Bearer ${token}`;
 
-    const res = await fetch(url, {
+    return fetch(url, {
       ...init,
       method,
       headers
     });
-
-    return res;
   }
 
-  async function jsonRequest<T>(method: string, path: string, body?: unknown, extraHeaders?: Record<string, string>): Promise<T> {
+  async function jsonRequest<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    extraHeaders?: Record<string, string>
+  ): Promise<T> {
     const headers: Record<string, string> = {
       ...(extraHeaders || {})
     };
@@ -149,7 +149,6 @@ export function createApiClient(getAccessToken: () => string | undefined, logger
         responseBody: parsed
       });
 
-      // If response is 204, parsed will be null; return as any.
       return unwrapEnvelope<T>(res.status, parsed) as T;
     } catch (err) {
       const ms = Math.max(0, Math.round(performance.now() - started));

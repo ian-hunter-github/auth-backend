@@ -5,51 +5,50 @@ export type StoredAuth = {
   user?: AuthUserProfile;
 };
 
-function key(sessionKey: string, part: string): string {
-  return `auth.${sessionKey}.${part}`;
+function k(sessionKey: string): string {
+  return `auth.${sessionKey}`;
+}
+
+function safeGetItem(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function safeSetItem(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // ignore
+  }
+}
+
+function safeRemoveItem(key: string) {
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    // ignore
+  }
 }
 
 export function loadAuth(sessionKey: string): StoredAuth {
-  const rawSession = localStorage.getItem(key(sessionKey, "session"));
-  const rawUser = localStorage.getItem(key(sessionKey, "user"));
+  const raw = safeGetItem(k(sessionKey));
+  if (!raw) return {};
 
-  let session: AuthSession | undefined;
-  let user: AuthUserProfile | undefined;
-
-  if (rawSession) {
-    try {
-      session = JSON.parse(rawSession) as AuthSession;
-    } catch {
-      session = undefined;
-    }
-  }
-
-  if (rawUser) {
-    try {
-      user = JSON.parse(rawUser) as AuthUserProfile;
-    } catch {
-      user = undefined;
-    }
-  }
-
-  return { ...(session ? { session } : {}), ...(user ? { user } : {}) };
-}
-
-export function saveAuth(sessionKey: string, v: StoredAuth): void {
-  if (v.session) {
-    localStorage.setItem(key(sessionKey, "session"), JSON.stringify(v.session));
-  } else {
-    localStorage.removeItem(key(sessionKey, "session"));
-  }
-
-  if (v.user) {
-    localStorage.setItem(key(sessionKey, "user"), JSON.stringify(v.user));
-  } else {
-    localStorage.removeItem(key(sessionKey, "user"));
+  try {
+    const parsed = JSON.parse(raw) as StoredAuth;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
   }
 }
 
-export function clearAuth(sessionKey: string): void {
-  localStorage.removeItem(key(sessionKey, "session"));
-  localStorage.removeItem(key(sessionKey, "user"));
+export function saveAuth(sessionKey: string, v: StoredAuth) {
+  safeSetItem(k(sessionKey), JSON.stringify(v));
+}
+
+export function clearAuth(sessionKey: string) {
+  safeRemoveItem(k(sessionKey));
 }
