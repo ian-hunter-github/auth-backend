@@ -77,10 +77,9 @@ export async function startNetlifyDev(): Promise<Harness> {
 
   const staticPort = await pickPort(staticPreferred, { exclude: new Set([proxyPort]) });
 
-  const cmd = process.platform === "win32" ? "npx.cmd" : "npx";
+  const cmd = process.platform === "win32" ? "bash.exe" : "bash";
   const args = [
-    "netlify",
-    "dev",
+    "scripts/netlify-dev.sh",
     "--offline",
     "--no-open",
     "--port",
@@ -89,11 +88,13 @@ export async function startNetlifyDev(): Promise<Harness> {
     String(staticPort)
   ];
 
+  const isCi = (process.env.CI || "").toLowerCase() === "true";
+
   // IMPORTANT:
-  // Using stdio: "ignore" prevents PIPEWRAP/FILEHANDLE handles from keeping Vitest alive.
-  // We rely on health polling for readiness and return a helpful error message on failure.
+  // - Local runs keep stdio ignored to avoid PIPEWRAP/FILEHANDLE handles keeping Vitest alive.
+  // - CI runs inherit stdio so failures are diagnosable (and cold-cache starts can take longer).
   const child = spawn(cmd, args, {
-    stdio: "ignore",
+    stdio: isCi ? "inherit" : "ignore",
     detached: process.platform !== "win32",
     env: {
       ...process.env,
@@ -109,12 +110,12 @@ export async function startNetlifyDev(): Promise<Harness> {
   const baseUrl = `http://localhost:${proxyPort}`;
 
   try {
-    await waitForHealthy(baseUrl, 90000);
+    await waitForHealthy(baseUrl, isCi ? 240000 : 90000);
   } catch (err) {
     killProcessTree(child.pid ?? 0, "SIGTERM");
     const original = err instanceof Error ? err.message : String(err);
     throw new Error(
-      `Failed to start netlify dev.\n\nBase URL: ${baseUrl}\nProxy port: ${proxyPort}\nStatic port: ${staticPort}\n\nOriginal error: ${original}\n\nTip: run manually for logs:\n  npx netlify dev --offline --no-open --port ${proxyPort} --staticServerPort ${staticPort}\n`
+      `Failed to start netlify dev.\n\nBase URL: ${baseUrl}\nProxy port: ${proxyPort}\nStatic port: ${staticPort}\n\nOriginal error: ${original}\n\nTip: run manually for logs:\n  bash scripts/netlify-dev.sh --offline --no-open --port ${proxyPort} --staticServerPort ${staticPort}\n`
     );
   }
 
