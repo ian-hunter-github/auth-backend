@@ -1,37 +1,30 @@
 import crypto from "node:crypto";
-import { sql } from "@vercel/postgres";
-import type { AuthProvider } from "./authProvider.js";
+import pg from "pg";
+import { AppError } from "../lib/errors.js";
+import { getEnv, requireEnv } from "../lib/env.js";
+import type { RequestContext } from "../security/requestContext.js";
+import type { AuthProvider, CreateUserInput, UpdateUserInput } from "./authProvider.js";
 import type {
-  AdminCreateUserRequest,
-  AdminUpdateUserRequest,
-  AdminUserResponse,
-  AdminUsersResponse,
   AuthLoginRequest,
   AuthLoginResponse,
   AuthLogoutRequest,
-  AuthMeResponse,
   AuthRefreshRequest,
   AuthRefreshResponse,
   AuthRegisterRequest,
   AuthRegisterResponse,
   AuthUserProfile
 } from "../contracts/auth.js";
-import { AppError } from "../lib/errors.js";
-import { sha256Hex } from "../lib/crypto.js";
-import { hashPassword, verifyPassword } from "../lib/passwords.js";
-import { isUuid } from "../lib/uuid.js";
-import { recordAuditEvent } from "./auditLogService.js";
-import type { RequestContext } from "../security/requestContext.js";
-import { createAccessToken, verifyAccessTokenOrThrow } from "../security/jwt.js";
+
+const { Pool } = pg;
 
 type DbUserRow = {
   id: string;
   email: string;
   display_name: string;
-  roles: string[];
-  password_salt: string;
-  password_hash: string;
-  deleted_at: string | null;
+  roles?: string[] | null;
+  deleted_at?: string | null;
+  password_salt?: string | null;
+  password_hash?: string | null;
 };
 
 type DbSessionRow = {
@@ -40,306 +33,189 @@ type DbSessionRow = {
   refresh_token_hash: string;
   expires_at: string;
   revoked_at: string | null;
-  session_family_id: string | null;
-  rotated_from_session_id: string | null;
 };
 
-function normalizeEmail(s: string): string {
-  return (s || "").trim().toLowerCase();
+let pool: pg.Pool | undefined;
+
+function getPool(): pg.Pool {
+  if (pool) return pool;
+
+  const host = requireEnv("PGHOST");
+  const database = requireEnv("PGDATABASE");
+  const user = requireEnv("PGUSER");
+  const password = requireEnv("PGPASSWORD");
+  const port = getEnv("PGPORT");
+  const sslMode = (getEnv("PGSSLMODE") || "require").toLowerCase();
+
+  const ssl = sslMode === "disable" ? undefined : { rejectUnauthorized: false };
+
+  pool = new Pool({
+    host,
+    database,
+    user,
+    password,
+    ...(port ? { port: Number(port) } : {}),
+    ...(ssl ? { ssl } : {})
+  });
+
+  return pool;
 }
 
-function normalizeDisplayName(s: string | undefined): string | undefined {
-  if (s === undefined) return undefined;
-  const t = (s || "").trim();
-  return t ? t : undefined;
-}
-
-function normalizeRoles(input: unknown): string[] {
-  if (Array.isArray(input)) {
-    const out = input.map((x) => String(x || "").trim().toLowerCase()).filter(Boolean);
-    return out.length ? Array.from(new Set(out)) : ["user"];
-  }
-  if (typeof input === "string") {
-    const out = input
-      .split(",")
-      .map((s) => s.trim().toLowerCase())
-      .filter(Boolean);
-    return out.length ? Array.from(new Set(out)) : ["user"];
-  }
-  return ["user"];
-}
-
-function requireNotDeleted(u: DbUserRow) {
-  if (u.deleted_at) {
-    throw new AppError("Not found", { code: "NOT_FOUND", status: 404 });
-  }
-}
-
-function nowIso(): string {
-  return new Date().toISOString();
-}
-
-function buildClaims(userId: string, sessionId: string, roles: string[]) {
+function toProfile(row: DbUserRow): AuthUserProfile {
+  const roles = Array.isArray(row.roles) && row.roles.length > 0 ? row.roles : ["user"];
   return {
-    sub: userId,
-    sid: sessionId,
+    id: row.id,
+    username: row.email,
+    displayName: row.display_name,
     roles
   };
 }
 
-async function createSession(
-  userId: string,
-  ctx?: RequestContext,
-  opts?: { sessionFamilyId?: string | null; rotatedFromSessionId?: string | null }
-): Promise<{
-  sessionId: string;
-  refreshToken: string;
-  refreshTokenHash: string;
-  expiresAt: string;
-  sessionFamilyId: string;
-}> {
-  const refreshToken = crypto.randomBytes(32).toString("hex");
+function requireNotDeleted(row: DbUserRow): void {
+  if (row.deleted_at) {
+    throw new AppError("Invalid credentials", { code: "UNAUTHORIZED", status: 401 });
+  }
+}
+
+const TOKEN_PREFIX = "pg-access-token.";
+
+function sha256Hex(input: string): string {
+  return crypto.createHash("sha256").update(input, "utf8").digest("hex");
+}
+
+function randomHex(bytes: number): string {
+  return crypto.randomBytes(bytes).toString("hex");
+}
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function addMinutesIso(minutes: number) {
+  return new Date(Date.now() + minutes * 60_000).toISOString();
+}
+
+function accessTokenForUser(userId: string, sessionId: string): string {
+  return `${TOKEN_PREFIX}${userId}.${sessionId}`;
+}
+
+function isUuid(v: string): boolean {
+  const s = (v || "").trim();
+  if (!s) return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
+}
+
+function parseAccessToken(token: string): { userId: string; sessionId: string } {
+  const t = (token || "").trim();
+  if (!t) throw new AppError("Missing token", { code: "UNAUTHORIZED", status: 401 });
+  if (!t.startsWith(TOKEN_PREFIX)) throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
+  const rest = t.slice(TOKEN_PREFIX.length);
+  if (!rest) throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
+
+  const parts = rest.split(".");
+  const userId = (parts[0] || "").trim();
+  const sessionId = (parts[1] || "").trim();
+  if (!userId || !sessionId) throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
+  if (!isUuid(userId) || !isUuid(sessionId)) throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
+  return { userId, sessionId };
+}
+
+async function createSession(userId: string): Promise<{ sessionId: string; refreshToken: string; expiresAt: string }> {
+  const refreshToken = `pg-refresh-token.${randomHex(24)}`;
   const refreshTokenHash = sha256Hex(refreshToken);
-  const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 30).toISOString(); // 30 days
+  const expiresAt = addMinutesIso(60);
 
-  const sessionFamilyId = opts?.sessionFamilyId ?? crypto.randomUUID();
+  const p = getPool();
+  const { rows } = await p.query<{ id: string }>(
+    `
+    insert into identity.sessions (user_id, refresh_token_hash, expires_at)
+    values ($1::uuid, $2, $3::timestamptz)
+    returning id
+    `,
+    [userId, refreshTokenHash, expiresAt]
+  );
 
-  const inserted = await sql<{ id: string; session_family_id: string }>`
-    insert into identity.sessions (
-      user_id, refresh_token_hash, expires_at,
-      session_family_id, rotated_from_session_id,
-      created_ip, last_used_ip, user_agent, last_used_at
-    )
-    values (
-      ${userId}::uuid, ${refreshTokenHash}, ${expiresAt}::timestamptz,
-      ${sessionFamilyId}::uuid, ${opts?.rotatedFromSessionId ?? null}::uuid,
-      ${ctx?.ip ?? null}, ${ctx?.ip ?? null}, ${ctx?.userAgent ?? null}, ${nowIso()}::timestamptz
-    )
-    returning id, session_family_id
-  `;
+  const sessionId = (rows[0]?.id || "").trim();
+  if (!sessionId || !isUuid(sessionId)) {
+    throw new AppError("Failed to create session", { code: "INTERNAL_ERROR", status: 500 });
+  }
 
-  const row = inserted.rows[0];
-  if (!row) throw new AppError("Failed to create session", { code: "INTERNAL_ERROR", status: 500 });
-
-  return {
-    sessionId: row.id,
-    refreshToken,
-    refreshTokenHash,
-    expiresAt,
-    sessionFamilyId: row.session_family_id
-  };
+  return { sessionId, refreshToken, expiresAt };
 }
 
 async function revokeSessionByHash(refreshTokenHash: string): Promise<void> {
-  await sql`
+  const p = getPool();
+  await p.query(
+    `
     update identity.sessions
-    set revoked_at = ${nowIso()}::timestamptz
-    where refresh_token_hash = ${refreshTokenHash}
+    set revoked_at = $2::timestamptz
+    where refresh_token_hash = $1
       and revoked_at is null
-  `;
+    `,
+    [refreshTokenHash, nowIso()]
+  );
 }
 
 async function revokeSessionsByUserId(userId: string): Promise<void> {
-  await sql`
+  const p = getPool();
+  await p.query(
+    `
     update identity.sessions
-    set revoked_at = ${nowIso()}::timestamptz
-    where user_id = ${userId}::uuid
+    set revoked_at = $2::timestamptz
+    where user_id = $1::uuid
       and revoked_at is null
-  `;
+    `,
+    [userId, nowIso()]
+  );
 }
 
 async function requireActiveSession(sessionId: string, userId: string): Promise<void> {
-  const s = await sql<DbSessionRow>`
-    select id, user_id, refresh_token_hash, expires_at, revoked_at,
-           session_family_id, rotated_from_session_id
+  const p = getPool();
+  const { rows } = await p.query<{ id: string }>(
+    `
+    select id
     from identity.sessions
-    where id = ${sessionId}::uuid
-      and user_id = ${userId}::uuid
+    where id = $1::uuid
+      and user_id = $2::uuid
+      and revoked_at is null
+      and expires_at > now()
     limit 1
-  `;
+    `,
+    [sessionId, userId]
+  );
 
-  const row = s.rows[0];
-  if (!row) throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
-
-  if (row.revoked_at) throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
-  if (new Date(row.expires_at).getTime() <= Date.now()) throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
-
-  await sql`
-    update identity.sessions
-    set last_used_at = ${nowIso()}::timestamptz
-    where id = ${sessionId}::uuid
-  `;
-}
-
-async function getUserByEmail(email: string): Promise<DbUserRow | null> {
-  const res = await sql<DbUserRow>`
-    select id, email, display_name, roles, password_salt, password_hash, deleted_at
-    from identity.users
-    where email = ${email}
-    limit 1
-  `;
-  return res.rows[0] ?? null;
-}
-
-async function getUserById(id: string): Promise<DbUserRow | null> {
-  const res = await sql<DbUserRow>`
-    select id, email, display_name, roles, password_salt, password_hash, deleted_at
-    from identity.users
-    where id = ${id}::uuid
-    limit 1
-  `;
-  return res.rows[0] ?? null;
-}
-
-async function listUsers(): Promise<DbUserRow[]> {
-  const res = await sql<DbUserRow>`
-    select id, email, display_name, roles, password_salt, password_hash, deleted_at
-    from identity.users
-    where deleted_at is null
-    order by created_at desc
-  `;
-  return res.rows;
-}
-
-async function createUser(input: { email: string; password: string; displayName?: string; roles?: unknown }): Promise<DbUserRow> {
-  const email = normalizeEmail(input.email);
-  const password = input.password || "";
-  const displayName = normalizeDisplayName(input.displayName);
-  const roles = normalizeRoles(input.roles);
-
-  if (!email || !password) {
-    throw new AppError("email and password are required", {
-      code: "BAD_REQUEST",
-      status: 400,
-      details: { fields: ["email", "password"] }
-    });
-  }
-
-  const existing = await getUserByEmail(email);
-  if (existing) throw new AppError("Email already exists", { code: "CONFLICT", status: 409 });
-
-  const salt = crypto.randomBytes(16).toString("hex");
-  const hash = hashPassword(salt, password);
-
-  const inserted = await sql<DbUserRow>`
-    insert into identity.users (email, display_name, roles, password_salt, password_hash)
-    values (${email}, ${displayName || email}, ${roles}, ${salt}, ${hash})
-    returning id, email, display_name, roles, password_salt, password_hash, deleted_at
-  `;
-
-  const u = inserted.rows[0];
-  if (!u) throw new AppError("Failed to create user", { code: "INTERNAL_ERROR", status: 500 });
-  return u;
-}
-
-async function updateUser(id: string, input: { displayName?: string; roles?: unknown }): Promise<DbUserRow> {
-  if (!isUuid(id)) throw new AppError("Not found", { code: "NOT_FOUND", status: 404 });
-
-  const displayName = input.displayName === undefined ? undefined : normalizeDisplayName(input.displayName);
-  const roles = input.roles === undefined ? undefined : normalizeRoles(input.roles);
-
-  const current = await getUserById(id);
-  if (!current) throw new AppError("Not found", { code: "NOT_FOUND", status: 404 });
-  requireNotDeleted(current);
-
-  const nextDisplayName = displayName === undefined ? current.display_name : displayName || current.email;
-  const nextRoles = roles === undefined ? current.roles : roles;
-
-  const updated = await sql<DbUserRow>`
-    update identity.users
-    set display_name = ${nextDisplayName},
-        roles = ${nextRoles}
-    where id = ${id}::uuid
-    returning id, email, display_name, roles, password_salt, password_hash, deleted_at
-  `;
-
-  const u = updated.rows[0];
-  if (!u) throw new AppError("Not found", { code: "NOT_FOUND", status: 404 });
-  return u;
-}
-
-async function deleteUser(id: string): Promise<void> {
-  if (!isUuid(id)) throw new AppError("Not found", { code: "NOT_FOUND", status: 404 });
-
-  const updated = await sql`
-    update identity.users
-    set deleted_at = ${nowIso()}::timestamptz
-    where id = ${id}::uuid
-      and deleted_at is null
-  `;
-
-  if (!updated.rowCount) {
-    const u = await getUserById(id);
-    if (!u) throw new AppError("Not found", { code: "NOT_FOUND", status: 404 });
+  if (!rows[0]) {
+    throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
   }
 }
 
-async function requireAdminUser(accessToken: string): Promise<{ user: DbUserRow; sessionId: string }> {
-  const { claims } = verifyAccessTokenOrThrow(accessToken);
-  const userId = claims.sub;
-  const sessionId = claims.sid;
-
-  if (!userId || !sessionId) throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
-
-  await requireActiveSession(sessionId, userId);
-
-  const u = await getUserById(userId);
-  if (!u) throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
-  requireNotDeleted(u);
-
-  const roles = Array.isArray(u.roles) ? u.roles : [];
-  if (!roles.includes("admin")) throw new AppError("Forbidden", { code: "FORBIDDEN", status: 403 });
-
-  return { user: u, sessionId };
+function requirePasswordFields(row: DbUserRow): { salt: string; hash: string } {
+  const salt = (row.password_salt || "").trim();
+  const hash = (row.password_hash || "").trim();
+  if (!salt || !hash) {
+    throw new AppError("Invalid credentials", { code: "UNAUTHORIZED", status: 401 });
+  }
+  return { salt, hash };
 }
 
-function toUserProfile(u: DbUserRow): AuthUserProfile {
-  return {
-    id: u.id,
-    username: u.email,
-    displayName: u.display_name,
-    roles: u.roles
-  };
+function hashPassword(salt: string, password: string): string {
+  // Must match DB seeding formula:
+  // encode(digest(convert_to(password_salt || password_plain,'utf8'),'sha256'),'hex')
+  return sha256Hex(`${salt}${password}`);
+}
+
+function normalizeRoles(roles: string[] | undefined): string[] {
+  const r = Array.isArray(roles) ? roles.map((x) => (x || "").trim()).filter((x) => x.length > 0) : [];
+  const unique = Array.from(new Set(r));
+  return unique.length > 0 ? unique : ["user"];
 }
 
 export const postgresAuthProvider: AuthProvider = {
-  register: async (req: AuthRegisterRequest, ctx?: RequestContext): Promise<AuthRegisterResponse> => {
-    const email = normalizeEmail(req.email);
-    const password = (req.password || "").trim();
-    const displayName = normalizeDisplayName(req.displayName);
+  login: async (req: AuthLoginRequest): Promise<AuthLoginResponse> => {
+    const username = (req.username || "").trim();
+    const password = req.password || "";
 
-    const u = await createUser({ email, password, displayName, roles: ["user"] });
-
-    const { sessionId, refreshToken, expiresAt } = await createSession(u.id, ctx);
-    const accessToken = createAccessToken(buildClaims(u.id, sessionId, u.roles));
-
-    await recordAuditEvent({
-      action: "auth.register_success",
-      actorUserId: u.id,
-      targetUserId: u.id,
-      requestId: ctx?.requestId || null,
-      ip: ctx?.ip || null,
-      userAgent: ctx?.userAgent || null,
-      details: { email: u.email }
-    });
-
-    return {
-      provider: "postgres",
-      session: {
-        accessToken,
-        tokenType: "bearer",
-        refreshToken,
-        expiresAt
-      },
-      user: toUserProfile(u)
-    };
-  },
-
-  login: async (req: AuthLoginRequest, ctx?: RequestContext): Promise<AuthLoginResponse> => {
-    const email = normalizeEmail(req.username);
-    const password = (req.password || "").trim();
-
-    if (!email || !password) {
+    if (!username || !password) {
       throw new AppError("username and password are required", {
         code: "BAD_REQUEST",
         status: 400,
@@ -347,48 +223,28 @@ export const postgresAuthProvider: AuthProvider = {
       });
     }
 
-    const u = await getUserByEmail(email);
-    if (!u) {
-      await recordAuditEvent({
-        action: "auth.login_failed",
-        actorUserId: null,
-        targetUserId: null,
-        requestId: ctx?.requestId || null,
-        ip: ctx?.ip || null,
-        userAgent: ctx?.userAgent || null,
-        details: { identifier: email, reason: "not_found" }
-      });
+    const email = username === "demo" ? "demo@example.com" : username;
+    const p = getPool();
+    const { rows } = await p.query<DbUserRow>(
+      "select id, email, display_name, roles, deleted_at, password_salt, password_hash from identity.users where email = $1 limit 1",
+      [email]
+    );
+
+    const row = rows[0];
+    if (!row) {
       throw new AppError("Invalid credentials", { code: "UNAUTHORIZED", status: 401 });
     }
 
-    requireNotDeleted(u);
+    requireNotDeleted(row);
 
-    const ok = verifyPassword(u.password_salt, u.password_hash, password);
-    if (!ok) {
-      await recordAuditEvent({
-        action: "auth.login_failed",
-        actorUserId: null,
-        targetUserId: u.id,
-        requestId: ctx?.requestId || null,
-        ip: ctx?.ip || null,
-        userAgent: ctx?.userAgent || null,
-        details: { identifier: email, reason: "bad_password" }
-      });
+    const { salt, hash } = requirePasswordFields(row);
+    const expected = hashPassword(salt, password);
+    if (expected !== hash) {
       throw new AppError("Invalid credentials", { code: "UNAUTHORIZED", status: 401 });
     }
 
-    const { sessionId, refreshToken, expiresAt } = await createSession(u.id, ctx);
-    const accessToken = createAccessToken(buildClaims(u.id, sessionId, u.roles));
-
-    await recordAuditEvent({
-      action: "auth.login_success",
-      actorUserId: u.id,
-      targetUserId: u.id,
-      requestId: ctx?.requestId || null,
-      ip: ctx?.ip || null,
-      userAgent: ctx?.userAgent || null,
-      details: { email: u.email }
-    });
+    const { sessionId, refreshToken, expiresAt } = await createSession(row.id);
+    const accessToken = accessTokenForUser(row.id, sessionId);
 
     return {
       provider: "postgres",
@@ -398,37 +254,64 @@ export const postgresAuthProvider: AuthProvider = {
         refreshToken,
         expiresAt
       },
-      user: toUserProfile(u)
+      user: toProfile(row)
     };
   },
 
-  me: async (accessToken: string, ctx?: RequestContext): Promise<AuthMeResponse> => {
-    const { claims } = verifyAccessTokenOrThrow(accessToken);
-    const userId = claims.sub;
-    const sessionId = claims.sid;
+  register: async (req: AuthRegisterRequest): Promise<AuthRegisterResponse> => {
+    const email = (req.email || "").trim().toLowerCase();
+    const password = req.password || "";
+    const displayName = (req.displayName || "").trim();
 
-    if (!userId || !sessionId) throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
+    if (!email || !password) {
+      throw new AppError("email and password are required", {
+        code: "BAD_REQUEST",
+        status: 400,
+        details: { fields: ["email", "password"] }
+      });
+    }
 
-    await requireActiveSession(sessionId, userId);
+    const p = getPool();
+    const { rows: existing } = await p.query<{ id: string }>(
+      "select id from identity.users where email = $1 limit 1",
+      [email]
+    );
+    if (existing[0]) {
+      throw new AppError("Email already exists", { code: "CONFLICT", status: 409 });
+    }
 
-    const u = await getUserById(userId);
-    if (!u) throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
-    requireNotDeleted(u);
+    const roles = ["user"];
+    const salt = randomHex(16);
+    const hash = hashPassword(salt, password);
 
-    await recordAuditEvent({
-      action: "auth.me",
-      actorUserId: u.id,
-      targetUserId: u.id,
-      requestId: ctx?.requestId || null,
-      ip: ctx?.ip || null,
-      userAgent: ctx?.userAgent || null,
-      details: null
-    });
+    const { rows } = await p.query<DbUserRow>(
+      `
+      insert into identity.users (email, display_name, roles, password_salt, password_hash)
+      values ($1, $2, $3, $4, $5)
+      returning id, email, display_name, roles, deleted_at, password_salt, password_hash
+      `,
+      [email, displayName || email, roles, salt, hash]
+    );
 
-    return { user: toUserProfile(u) };
+    const u = rows[0];
+    if (!u) throw new AppError("Failed to create user", { code: "INTERNAL_ERROR", status: 500 });
+
+    const { sessionId, refreshToken, expiresAt } = await createSession(u.id);
+    const accessToken = accessTokenForUser(u.id, sessionId);
+
+    return {
+      provider: "postgres",
+      session: {
+        accessToken,
+        tokenType: "bearer",
+        refreshToken,
+        expiresAt
+      },
+      user: toProfile(u)
+    };
   },
 
-  refresh: async (req: AuthRefreshRequest, ctx?: RequestContext): Promise<AuthRefreshResponse> => {
+  refresh: async (req: AuthRefreshRequest): Promise<AuthRefreshResponse> => {
     const refreshToken = (req.refreshToken || "").trim();
     if (!refreshToken) {
       throw new AppError("refreshToken is required", {
@@ -440,193 +323,208 @@ export const postgresAuthProvider: AuthProvider = {
 
     const refreshTokenHash = sha256Hex(refreshToken);
 
-    const s = await sql<DbSessionRow>`
-      select id, user_id, refresh_token_hash, expires_at, revoked_at,
-             session_family_id, rotated_from_session_id
+    const p = getPool();
+    const { rows } = await p.query<DbSessionRow>(
+      `
+      select id, user_id, refresh_token_hash, expires_at, revoked_at
       from identity.sessions
-      where refresh_token_hash = ${refreshTokenHash}
+      where refresh_token_hash = $1
       limit 1
-    `;
+      `,
+      [refreshTokenHash]
+    );
 
-    const row = s.rows[0];
-    if (!row) throw new AppError("Invalid refresh token", { code: "UNAUTHORIZED", status: 401 });
-    if (row.revoked_at) throw new AppError("Invalid refresh token", { code: "UNAUTHORIZED", status: 401 });
-    if (new Date(row.expires_at).getTime() <= Date.now()) throw new AppError("Invalid refresh token", { code: "UNAUTHORIZED", status: 401 });
+    const s = rows[0];
+    if (!s) {
+      throw new AppError("Invalid refresh token", { code: "UNAUTHORIZED", status: 401 });
+    }
 
-    const u = await getUserById(row.user_id);
-    if (!u) throw new AppError("Invalid refresh token", { code: "UNAUTHORIZED", status: 401 });
+    if (s.revoked_at) {
+      throw new AppError("Invalid refresh token", { code: "UNAUTHORIZED", status: 401 });
+    }
+
+    if (new Date(s.expires_at).getTime() <= Date.now()) {
+      throw new AppError("Invalid refresh token", { code: "UNAUTHORIZED", status: 401 });
+    }
+
+    const { rows: users } = await p.query<DbUserRow>(
+      "select id, email, display_name, roles, deleted_at, password_salt, password_hash from identity.users where id = $1::uuid limit 1",
+      [s.user_id]
+    );
+
+    const u = users[0];
+    if (!u) {
+      throw new AppError("Invalid refresh token", { code: "UNAUTHORIZED", status: 401 });
+    }
     requireNotDeleted(u);
 
     await revokeSessionByHash(refreshTokenHash);
 
-    const next = await createSession(row.user_id, ctx, {
-      sessionFamilyId: row.session_family_id,
-      rotatedFromSessionId: row.id
-    });
+    const { sessionId, refreshToken: nextRefreshToken, expiresAt } = await createSession(s.user_id);
 
-    const accessToken = createAccessToken(buildClaims(u.id, next.sessionId, u.roles));
-
-    await recordAuditEvent({
-      action: "auth.refresh_success",
-      actorUserId: u.id,
-      targetUserId: u.id,
-      requestId: ctx?.requestId || null,
-      ip: ctx?.ip || null,
-      userAgent: ctx?.userAgent || null,
-      details: { sessionFamilyId: row.session_family_id, rotatedFromSessionId: row.id }
-    });
+    const accessToken = accessTokenForUser(u.id, sessionId);
 
     return {
       provider: "postgres",
       session: {
         accessToken,
         tokenType: "bearer",
-        refreshToken: next.refreshToken,
-        expiresAt: next.expiresAt
+        refreshToken: nextRefreshToken,
+        expiresAt
       },
-      user: toUserProfile(u)
+      user: toProfile(u)
     };
   },
 
-  logout: async (accessToken: string, req?: AuthLogoutRequest, ctx?: RequestContext): Promise<void> => {
+  logout: async (accessToken: string, req?: AuthLogoutRequest, _ctx?: RequestContext): Promise<void> => {
     const refreshToken = (req?.refreshToken || "").trim();
-
-    const { claims } = verifyAccessTokenOrThrow(accessToken);
-    const userId = claims.sub;
 
     if (refreshToken) {
       const refreshTokenHash = sha256Hex(refreshToken);
       await revokeSessionByHash(refreshTokenHash);
-    } else {
-      await revokeSessionsByUserId(userId);
+      return;
     }
 
-    await recordAuditEvent({
-      action: "auth.logout",
-      actorUserId: userId,
-      targetUserId: userId,
-      requestId: ctx?.requestId || null,
-      ip: ctx?.ip || null,
-      userAgent: ctx?.userAgent || null,
-      details: null
-    });
+    const { userId } = parseAccessToken(accessToken);
+    await revokeSessionsByUserId(userId);
+  },
+
+  getUserFromToken: async (token: string): Promise<AuthUserProfile> => {
+    const { userId, sessionId } = parseAccessToken(token);
+
+    await requireActiveSession(sessionId, userId);
+
+    const p = getPool();
+    const { rows } = await p.query<DbUserRow>(
+      "select id, email, display_name, roles, deleted_at, password_salt, password_hash from identity.users where id = $1::uuid limit 1",
+      [userId]
+    );
+
+    const row = rows[0];
+    if (!row) {
+      throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
+    }
+    requireNotDeleted(row);
+
+    return toProfile(row);
   },
 
   listUsers: async (): Promise<AuthUserProfile[]> => {
-    const rows = await listUsers();
-    return rows.map(toUserProfile);
+    const p = getPool();
+    const { rows } = await p.query<DbUserRow>(
+      "select id, email, display_name, roles, deleted_at from identity.users where deleted_at is null order by created_at desc"
+    );
+    return rows.map(toProfile);
   },
 
   getUserById: async (id: string): Promise<AuthUserProfile> => {
     if (!isUuid(id)) throw new AppError("Not found", { code: "NOT_FOUND", status: 404 });
-    const u = await getUserById(id);
-    if (!u) throw new AppError("Not found", { code: "NOT_FOUND", status: 404 });
-    requireNotDeleted(u);
-    return toUserProfile(u);
+
+    const p = getPool();
+    const { rows } = await p.query<DbUserRow>(
+      "select id, email, display_name, roles, deleted_at from identity.users where id = $1::uuid limit 1",
+      [id]
+    );
+    const row = rows[0];
+    if (!row || row.deleted_at) throw new AppError("Not found", { code: "NOT_FOUND", status: 404 });
+    return toProfile(row);
   },
 
-  createUser: async (input) => {
-    const u = await createUser(input);
-    return toUserProfile(u);
+  createUser: async (input: CreateUserInput): Promise<AuthUserProfile> => {
+    const email = (input.email || "").trim().toLowerCase();
+    const password = input.password || "";
+    const displayName = (input.displayName || "").trim();
+    const roles = normalizeRoles(input.roles);
+
+    if (!email || !password) {
+      throw new AppError("email and password are required", {
+        code: "BAD_REQUEST",
+        status: 400,
+        details: { fields: ["email", "password"] }
+      });
+    }
+
+    const p = getPool();
+    const { rows: existing } = await p.query<{ id: string }>(
+      "select id from identity.users where email = $1 limit 1",
+      [email]
+    );
+    if (existing[0]) {
+      throw new AppError("Email already exists", { code: "CONFLICT", status: 409 });
+    }
+
+    const salt = randomHex(16);
+    const hash = hashPassword(salt, password);
+
+    const { rows } = await p.query<DbUserRow>(
+      `
+      insert into identity.users (email, display_name, roles, password_salt, password_hash)
+      values ($1, $2, $3, $4, $5)
+      returning id, email, display_name, roles, deleted_at
+      `,
+      [email, displayName || email, roles, salt, hash]
+    );
+
+    const u = rows[0];
+    if (!u) throw new AppError("Failed to create user", { code: "INTERNAL_ERROR", status: 500 });
+    return toProfile(u);
   },
 
-  updateUser: async (id, input) => {
-    const u = await updateUser(id, input);
-    return toUserProfile(u);
+  updateUser: async (id: string, input: UpdateUserInput): Promise<AuthUserProfile> => {
+    if (!isUuid(id)) throw new AppError("Not found", { code: "NOT_FOUND", status: 404 });
+
+    const displayName = input.displayName === undefined ? undefined : (input.displayName || "").trim();
+    const roles = input.roles === undefined ? undefined : normalizeRoles(input.roles);
+
+    const p = getPool();
+
+    const { rows: existing } = await p.query<DbUserRow>(
+      "select id, email, display_name, roles, deleted_at from identity.users where id = $1::uuid limit 1",
+      [id]
+    );
+    const current = existing[0];
+    if (!current || current.deleted_at) throw new AppError("Not found", { code: "NOT_FOUND", status: 404 });
+
+    const nextDisplayName = displayName === undefined ? current.display_name : displayName || current.email;
+    const nextRoles = roles === undefined ? (Array.isArray(current.roles) ? current.roles : ["user"]) : roles;
+
+    const { rows } = await p.query<DbUserRow>(
+      `
+      update identity.users
+      set display_name = $2,
+          roles = $3
+      where id = $1::uuid
+      returning id, email, display_name, roles, deleted_at
+      `,
+      [id, nextDisplayName, nextRoles]
+    );
+
+    const updated = rows[0];
+    if (!updated) throw new AppError("Not found", { code: "NOT_FOUND", status: 404 });
+
+    return toProfile(updated);
   },
 
-  deleteUser: async (id) => {
-    await deleteUser(id);
+  deleteUser: async (id: string): Promise<void> => {
+    if (!isUuid(id)) throw new AppError("Not found", { code: "NOT_FOUND", status: 404 });
+
+    const p = getPool();
+
+    const { rowCount } = await p.query(
+      `
+      update identity.users
+      set deleted_at = $2::timestamptz
+      where id = $1::uuid
+        and deleted_at is null
+      `,
+      [id, nowIso()]
+    );
+
+    if (!rowCount) {
+      const { rows } = await p.query<{ id: string }>("select id from identity.users where id = $1::uuid limit 1", [id]);
+      if (!rows[0]) {
+        throw new AppError("Not found", { code: "NOT_FOUND", status: 404 });
+      }
+    }
   }
 };
-
-export async function adminCreateUser(
-  adminToken: string,
-  body: AdminCreateUserRequest,
-  ctx?: RequestContext
-): Promise<AdminUserResponse> {
-  const { user: me } = await requireAdminUser(adminToken);
-
-  const created = await createUser({
-    email: body.email,
-    password: body.password,
-    displayName: body.displayName,
-    roles: body.roles
-  });
-
-  await recordAuditEvent({
-    action: "auth.admin.user_created",
-    actorUserId: me.id,
-    targetUserId: created.id,
-    requestId: ctx?.requestId || null,
-    ip: ctx?.ip || null,
-    userAgent: ctx?.userAgent || null,
-    details: { email: created.email, roles: created.roles }
-  });
-
-  return { user: toUserProfile(created) };
-}
-
-export async function adminListUsers(adminToken: string): Promise<AdminUsersResponse> {
-  await requireAdminUser(adminToken);
-  const users = await listUsers();
-  return { users: users.map(toUserProfile) };
-}
-
-export async function adminGetUserById(adminToken: string, id: string): Promise<AdminUserResponse> {
-  await requireAdminUser(adminToken);
-  if (!isUuid(id)) throw new AppError("Not found", { code: "NOT_FOUND", status: 404 });
-  const u = await getUserById(id);
-  if (!u) throw new AppError("Not found", { code: "NOT_FOUND", status: 404 });
-  requireNotDeleted(u);
-  return { user: toUserProfile(u) };
-}
-
-export async function adminUpdateUser(
-  adminToken: string,
-  id: string,
-  body: AdminUpdateUserRequest,
-  ctx?: RequestContext
-): Promise<AdminUserResponse> {
-  const { user: me } = await requireAdminUser(adminToken);
-
-  const updated = await updateUser(id, { displayName: body.displayName, roles: body.roles });
-
-  await recordAuditEvent({
-    action: "auth.admin.user_updated",
-    actorUserId: me.id,
-    targetUserId: updated.id,
-    requestId: ctx?.requestId || null,
-    ip: ctx?.ip || null,
-    userAgent: ctx?.userAgent || null,
-    details: { email: updated.email, roles: updated.roles }
-  });
-
-  return { user: toUserProfile(updated) };
-}
-
-export async function adminDeleteUser(
-  adminToken: string,
-  id: string,
-  ctx?: RequestContext
-): Promise<void> {
-  const { user: me } = await requireAdminUser(adminToken);
-
-  if (!isUuid(id)) throw new AppError("Not found", { code: "NOT_FOUND", status: 404 });
-  const target = await getUserById(id);
-  if (!target) throw new AppError("Not found", { code: "NOT_FOUND", status: 404 });
-  requireNotDeleted(target);
-
-  await deleteUser(id);
-  await revokeSessionsByUserId(id);
-
-  await recordAuditEvent({
-    action: "auth.admin.user_deleted",
-    actorUserId: me.id,
-    targetUserId: target.id,
-    requestId: ctx?.requestId || null,
-    ip: ctx?.ip || null,
-    userAgent: ctx?.userAgent || null,
-    details: { email: target.email }
-  });
-}
