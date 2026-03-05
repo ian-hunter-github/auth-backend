@@ -1,61 +1,34 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Fetch an admin access token from the auth service.
-#
-# Usage:
-#   scripts/get-admin-token.sh [BASE_URL]
-#
-# Examples:
-#   scripts/get-admin-token.sh
-#   scripts/get-admin-token.sh http://localhost:3999
-#
-# Output:
-#   Prints token and exports ADMIN_TOKEN for subshell usage.
+# Logs in using the seeded admin demo user and prints ONLY the access token.
+# Usage: ./scripts/get-admin-token.sh [BASE_URL]
+# Example: ./scripts/get-admin-token.sh https://auth-backend-netlify.netlify.app
 
-ADMIN_USERNAME="${ADMIN_USERNAME:-admin}"
-ADMIN_PASSWORD="${ADMIN_PASSWORD:-196900}"
-
-default_base_url="$(node -e '
-const fs=require("fs");
-try{
-  const s=JSON.parse(fs.readFileSync(".netlify/state.json","utf8"));
-  if(s?.siteData?.url){process.stdout.write(s.siteData.url);process.exit(0);}
-}catch{}
-process.stdout.write("http://localhost:3999");
-')"
-
-BASE_URL="${1:-${BASE_URL:-$default_base_url}}"
-BASE_URL="${BASE_URL%/}"
-
-LOGIN_URL="${BASE_URL}/.netlify/functions/auth-login"
-
-echo "Logging in as admin at ${BASE_URL}..." >&2
-
-resp="$(curl -sS \
-  -H "content-type: application/json" \
-  -d "{\"username\":\"${ADMIN_USERNAME}\",\"password\":\"${ADMIN_PASSWORD}\"}" \
-  "$LOGIN_URL")"
-
-token="$(echo "$resp" | node -e '
-const fs=require("fs");
-const j=JSON.parse(fs.readFileSync(0,"utf8"));
-const t=j?.data?.session?.accessToken;
-if(!t){process.exit(1);}
-process.stdout.write(t);
-')"
-
-if [[ -z "$token" ]]; then
-  echo "ERROR: could not obtain admin token" >&2
-  echo "$resp" >&2
-  exit 1
+BASE_URL="${1:-${BASE_URL:-}}"
+if [[ -z "${BASE_URL}" ]]; then
+  echo "Usage: $0 [BASE_URL]" >&2
+  echo "Or set BASE_URL env var." >&2
+  exit 2
 fi
 
-export ADMIN_TOKEN="$token"
+# Seeded admin user in db/identity/seed.sql
+USERNAME="${ADMIN_USERNAME:-demo}"
+PASSWORD="${ADMIN_PASSWORD:-letmein}"
 
-echo ""
-echo "ADMIN_TOKEN:"
-echo "$ADMIN_TOKEN"
-echo ""
-echo "Example usage:"
-echo "scripts/health-admin.sh \"\$ADMIN_TOKEN\" $BASE_URL"
+res="$(
+  curl -sS \
+    -H "content-type: application/json" \
+    -X POST \
+    "${BASE_URL}/.netlify/functions/auth-login" \
+    -d "{\"username\":\"${USERNAME}\",\"password\":\"${PASSWORD}\"}"
+)"
+
+python3 - <<'PY'
+import json,sys
+data=json.loads(sys.stdin.read())
+if not data.get("ok"):
+  sys.exit(1)
+print(data["data"]["session"]["accessToken"])
+PY <<<"${res}"
+
