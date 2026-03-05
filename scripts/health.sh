@@ -39,6 +39,9 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+BASE_URL="${1:-${BASE_URL:-http://localhost:3999}}"
+BASE_URL="${BASE_URL%/}"
+
 if ! command -v curl >/dev/null 2>&1; then
   echo "ERROR: curl is required" >&2
   exit 2
@@ -48,21 +51,6 @@ if ! command -v node >/dev/null 2>&1; then
   echo "ERROR: node is required" >&2
   exit 2
 fi
-
-default_base_url="$(node -e '
-  const fs = require("fs");
-  const path = ".netlify/state.json";
-  try {
-    const raw = fs.readFileSync(path, "utf8");
-    const j = JSON.parse(raw);
-    const url = j && j.siteData && typeof j.siteData.url === "string" ? j.siteData.url.trim() : "";
-    if (url) { process.stdout.write(url); process.exit(0); }
-  } catch {}
-  process.stdout.write("http://localhost:3999");
-')"
-
-BASE_URL="${1:-${BASE_URL:-$default_base_url}}"
-BASE_URL="${BASE_URL%/}"
 
 URL="${BASE_URL}/.netlify/functions/health"
 
@@ -87,9 +75,7 @@ if [[ "$ENV_ONLY" -eq 1 ]]; then
       process.exit(0);
     }
 
-    // Supabase intentionally omitted.
-    const { supabase, ...rest } = env;
-    console.log(JSON.stringify(rest, null, 2));
+    console.log(JSON.stringify(env, null, 2));
   '
   exit 0
 fi
@@ -99,37 +85,24 @@ echo "$raw" | node -e '
   const raw = fs.readFileSync(0, "utf8").trim();
   let j;
   try { j = JSON.parse(raw); } catch (e) { console.error("ERROR: invalid JSON"); process.exit(1); }
-
   console.log(JSON.stringify(j, null, 2));
 
-  const data = j && typeof j === "object" ? (j.data ?? j) : null;
-  const requestId = j && typeof j === "object" ? (j.requestId ?? undefined) : undefined;
+  const env = j && j.data && j.data.env ? j.data.env : undefined;
+  const requestId = j && typeof j === "object" ? (j.requestId ?? "<none>") : "<none>";
+  const ok = j && typeof j === "object" ? (j.ok ?? "<unknown>") : "<unknown>";
 
-  const h = data && typeof data === "object" ? data : {};
-  const build = h.build && typeof h.build === "object" ? h.build : {};
-  const env = h.env && typeof h.env === "object" ? h.env : {};
+  const authProvider = env && env.authProvider ? env.authProvider : "<unset>";
+  const pg = env && env.postgres ? env.postgres : {};
+  const nodeVer = j && j.data && j.data.build && j.data.build.node ? j.data.build.node : "<unknown>";
 
-  const status = typeof h.status === "string" ? h.status : "unknown";
-  const version = typeof h.version === "string" ? h.version : "unknown";
-  const node = typeof build.node === "string" ? build.node : "unknown";
-  const provider = typeof env.authProvider === "string" ? env.authProvider : "unknown";
-
-  const pg = env.postgres && typeof env.postgres === "object" ? env.postgres : {};
-  const yn = (v) => (v ? "yes" : "no");
-
-  const pgHost = yn(!!pg.hasHost);
-  const pgDb = yn(!!pg.hasDatabase);
-  const pgUser = yn(!!pg.hasUser);
-  const pgPass = yn(!!pg.hasPassword);
-  const pgPort = yn(!!pg.hasPort);
-  const pgSsl = yn(!!pg.hasSslMode);
-
+  const yesno = (b) => (b ? "yes" : "no");
   console.log("");
   console.log("Summary:");
-  console.log(`  status    : ${status}`);
-  console.log(`  version   : ${version}`);
-  if (requestId) console.log(`  requestId : ${requestId}`);
-  console.log(`  node      : ${node}`);
-  console.log(`  provider  : ${provider}`);
-  console.log(`  postgres  : host=${pgHost} db=${pgDb} user=${pgUser} pass=${pgPass} port=${pgPort} sslmode=${pgSsl}`);
+  console.log(`  ok        : ${ok}`);
+  console.log(`  requestId : ${requestId}`);
+  console.log(`  node      : ${nodeVer}`);
+  console.log(`  provider  : ${authProvider}`);
+  console.log(
+    `  postgres  : host=${yesno(pg.hasHost)} db=${yesno(pg.hasDatabase)} user=${yesno(pg.hasUser)} pass=${yesno(pg.hasPassword)} port=${yesno(pg.hasPort)} sslmode=${yesno(pg.hasSslMode)}`
+  );
 '
