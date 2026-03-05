@@ -80,41 +80,45 @@ export async function checkLockout(
 
   const p = getPool();
   if (!p) {
+    const windowStart = bucketStart(now, policy.windowSeconds).getTime();
     const s = mem.get(key);
-    if (!s) return { locked: false };
 
-    if (s.lockedUntilMs && s.lockedUntilMs > nowMs) {
-      return {
-        locked: true,
-        lockedUntil: new Date(s.lockedUntilMs).toISOString(),
-        retryAfterSeconds: retryAfterSeconds(nowMs, s.lockedUntilMs)
-      };
-    }
+    if (!s || s.windowStartMs !== windowStart) return { locked: false };
 
-    if (nowMs - s.windowStartMs > policy.windowSeconds * 1000) {
-      mem.delete(key);
-    }
+    const lockedUntilMs = s.lockedUntilMs;
+    if (!lockedUntilMs) return { locked: false };
 
-    return { locked: false };
+    if (lockedUntilMs <= nowMs) return { locked: false };
+
+    return {
+      locked: true,
+      lockedUntil: new Date(lockedUntilMs).toISOString(),
+      retryAfterSeconds: retryAfterSeconds(nowMs, lockedUntilMs)
+    };
   }
+
+  const bucket = bucketStart(now, policy.windowSeconds);
 
   const res = await p.query<{ locked_until: string | null }>(
     `
-      select max(locked_until) as locked_until
+      select locked_until
       from identity.auth_failures
       where identifier = $1::text
         and ip = $2::text
-        and window_seconds = $3::int
-        and locked_until is not null
-        and locked_until > now()
+        and window_start = $3::timestamptz
+        and window_seconds = $4::int
+      limit 1
     `,
-    [(input.identifier || "").trim().toLowerCase(), (input.ip || "").trim(), policy.windowSeconds]
+    [(input.identifier || "").trim().toLowerCase(), (input.ip || "").trim(), bucket.toISOString(), policy.windowSeconds]
   );
 
-  const lockedUntil = res.rows[0]?.locked_until || null;
+  const row = res.rows[0];
+  const lockedUntil = row?.locked_until || null;
   if (!lockedUntil) return { locked: false };
 
   const untilMs = new Date(lockedUntil).getTime();
+  if (Number.isNaN(untilMs) || untilMs <= nowMs) return { locked: false };
+
   return {
     locked: true,
     lockedUntil,
@@ -243,3 +247,12 @@ export async function recordLoginFailure(
 
   return lockedUntil ? { lockedNow, lockedUntil } : { lockedNow: false };
 }
+
+
+export async function closeLoginLockoutPool(): Promise<void> {
+  if (!pool) return;
+  const p = pool;
+  pool = undefined;
+  await p.end();
+}
+

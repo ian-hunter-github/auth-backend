@@ -12,9 +12,54 @@ export type RateLimitResult = {
   retryAfterSeconds?: number;
 };
 
-const pool = process.env.PG_CONNECTION_STRING
-  ? new Pool({ connectionString: process.env.PG_CONNECTION_STRING })
-  : undefined;
+let pool: Pool | undefined;
+
+function hasPgEnv(): boolean {
+  return (
+    !!process.env.PG_CONNECTION_STRING ||
+    (!!process.env.PGHOST && !!process.env.PGDATABASE && !!process.env.PGUSER && !!process.env.PGPASSWORD)
+  );
+}
+
+function getPool(): Pool | undefined {
+  if (pool) return pool;
+  if (!hasPgEnv()) return undefined;
+
+  if (process.env.PG_CONNECTION_STRING) {
+    pool = new Pool({ connectionString: process.env.PG_CONNECTION_STRING });
+    return pool;
+  }
+
+  const host = process.env.PGHOST!;
+  const database = process.env.PGDATABASE!;
+  const user = process.env.PGUSER!;
+  const password = process.env.PGPASSWORD!;
+  const port = Number(process.env.PGPORT || "5432");
+  const sslmode = (process.env.PGSSLMODE || "").toLowerCase();
+
+  const ssl =
+    sslmode === "require" || sslmode === "verify-ca" || sslmode === "verify-full"
+      ? { rejectUnauthorized: false }
+      : undefined;
+
+  pool = new Pool({
+    host,
+    database,
+    user,
+    password,
+    port,
+    ...(ssl ? { ssl } : {})
+  });
+
+  return pool;
+}
+
+export async function closeRateLimiterPool(): Promise<void> {
+  if (!pool) return;
+  const p = pool;
+  pool = undefined;
+  await p.end();
+}
 
 type MemKey = string;
 
@@ -72,7 +117,8 @@ export async function checkRateLimit(
   const key = makeRateKey([rateKey]);
 
   // Deterministic fallback for tests/dev when PG isn't configured.
-  if (!pool) {
+  const p = getPool();
+  if (!p) {
     return memCheck(policy, key);
   }
 
@@ -80,8 +126,14 @@ export async function checkRateLimit(
   const bucket = bucketStart(now, policy.bucketSeconds);
   const expires = new Date(bucket.getTime() + policy.bucketSeconds * 1000);
 
-  const client = await pool.connect();
+  const client = await p.connect();
   try {
+    try {
+      await client.query(`delete from identity.rate_limits where expires_at < now()`);
+    } catch {
+      // Best effort only.
+    }
+
     const res = await client.query(
       `
       insert into identity.rate_limits (rate_key, route, bucket_start, bucket_seconds, hit_count, expires_at)
@@ -108,3 +160,4 @@ export async function checkRateLimit(
 export function rateKeyFromContext(ctx: RequestContext): string {
   return makeRateKey([ctx.ip || "unknown"]);
 }
+
