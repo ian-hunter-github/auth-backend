@@ -9,7 +9,7 @@ import {
   Paper,
   Stack,
   Switch,
-  Typography
+  Typography,
 } from "@mui/material";
 import { useAuth } from "../auth/useAuth";
 import { LoginModal } from "../components/LoginModal";
@@ -98,7 +98,9 @@ export function AdminPanel() {
   }
 
   return (
-    <Paper sx={{ p: 2, height: "100%", display: "grid", gridTemplateRows: "auto auto 1fr", gap: 1.5 }}>
+    <Paper
+      sx={{ p: 2, height: "100%", display: "grid", gridTemplateRows: "auto auto 1fr", gap: 1.5 }}
+    >
       <Box>
         <Typography variant="h6">Admin Panel</Typography>
         <Typography variant="body2" color="text.secondary">
@@ -116,10 +118,18 @@ export function AdminPanel() {
           <Chip label="Logged out" color="default" size="small" />
         )}
         {auth.user?.username ? <Chip label={auth.user.username} size="small" /> : null}
-        {auth.user?.roles?.length ? <Chip label={(auth.user.roles || []).join(", ")} size="small" /> : null}
+        {auth.user?.roles?.length ? (
+          <Chip label={(auth.user.roles || []).join(", ")} size="small" />
+        ) : null}
 
         <FormControlLabel
-          control={<Switch size="small" checked={dbg.enabled} onChange={(e) => dbg.setEnabled(e.target.checked)} />}
+          control={
+            <Switch
+              size="small"
+              checked={dbg.enabled}
+              onChange={(e) => dbg.setEnabled(e.target.checked)}
+            />
+          }
           label="Debug"
           sx={{ ml: 0.5 }}
         />
@@ -138,7 +148,12 @@ export function AdminPanel() {
             <Button variant="outlined" onClick={() => void loadUsers()} disabled={auth.busy}>
               Reload users
             </Button>
-            <Button variant="contained" color="error" onClick={() => void auth.logout()} disabled={auth.busy}>
+            <Button
+              variant="contained"
+              color="error"
+              onClick={() => void auth.logout()}
+              disabled={auth.busy}
+            >
               Logout
             </Button>
           </Stack>
@@ -146,8 +161,12 @@ export function AdminPanel() {
       </Stack>
 
       <Box sx={{ minHeight: 0, display: "grid", gridTemplateRows: "auto auto auto 1fr", gap: 1 }}>
-        {auth.lastError ? <Alert severity="error">{`${auth.lastError.code}: ${auth.lastError.message}`}</Alert> : null}
-        {panelError ? <Alert severity="error">{`${panelError.code}: ${panelError.message}`}</Alert> : null}
+        {auth.lastError ? (
+          <Alert severity="error">{`${auth.lastError.code}: ${auth.lastError.message}`}</Alert>
+        ) : null}
+        {panelError ? (
+          <Alert severity="error">{`${panelError.code}: ${panelError.message}`}</Alert>
+        ) : null}
 
         <DebugLogViewer />
 
@@ -157,7 +176,8 @@ export function AdminPanel() {
           <Box sx={{ minHeight: 0, display: "grid", gridTemplateRows: "auto 1fr", gap: 1 }}>
             {!isAdmin ? (
               <Alert severity="warning">
-                This account does not have <code>admin</code> role. Admin endpoints will be forbidden.
+                This account does not have <code>admin</code> role. Admin endpoints will be
+                forbidden.
               </Alert>
             ) : null}
 
@@ -194,7 +214,7 @@ export function AdminPanel() {
       <LoginModal
         open={loginOpen}
         title="Admin Login"
-        defaultUsername="demo"
+        defaultUsername="admin"
         onClose={() => setLoginOpen(false)}
         onSubmit={doLogin}
         busy={auth.busy}

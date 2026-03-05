@@ -1,18 +1,28 @@
 import React, { useEffect, useState } from "react";
-import { Alert, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, TextField } from "@mui/material";
+import {
+  Alert,
+  Box,
+  Button,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  TextField,
+} from "@mui/material";
 import type { ApiError } from "../api/apiClient";
 
 export function LoginModal(props: {
   open: boolean;
   title: string;
   defaultUsername?: string;
+  defaultPassword?: string;
   onClose: () => void;
   onSubmit: (username: string, password: string) => Promise<void>;
   busy?: boolean;
   error?: ApiError;
 }) {
   const [username, setUsername] = useState(props.defaultUsername || "");
-  const [password, setPassword] = useState("");
+  const [password, setPassword] = useState(props.defaultPassword || "196900");
 
   useEffect(() => {
     if (props.open) {
@@ -27,11 +37,18 @@ export function LoginModal(props: {
   }
 
   return (
-    <Dialog open={props.open} onClose={props.busy ? undefined : props.onClose} maxWidth="xs" fullWidth>
+    <Dialog
+      open={props.open}
+      onClose={props.busy ? undefined : props.onClose}
+      maxWidth="xs"
+      fullWidth
+    >
       <DialogTitle>{props.title}</DialogTitle>
       <DialogContent>
         <Box component="form" onSubmit={handleSubmit} sx={{ display: "grid", gap: 2, pt: 1 }}>
-          {props.error ? <Alert severity="error">{`${props.error.code}: ${props.error.message}`}</Alert> : null}
+          {props.error ? (
+            <Alert severity="error">{`${props.error.code}: ${props.error.message}`}</Alert>
+          ) : null}
 
           <TextField
             label="Email / Username"
@@ -57,7 +74,11 @@ export function LoginModal(props: {
         <Button onClick={props.onClose} disabled={!!props.busy}>
           Cancel
         </Button>
-        <Button variant="contained" onClick={() => void handleSubmit()} disabled={!!props.busy || !username || !password}>
+        <Button
+          variant="contained"
+          onClick={() => void handleSubmit()}
+          disabled={!!props.busy || !username || !password}
+        >
           Login
         </Button>
       </DialogActions>
