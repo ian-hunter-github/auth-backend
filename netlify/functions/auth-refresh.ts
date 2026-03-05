@@ -30,17 +30,15 @@ export const handler: Handler = async (event) => {
     const req = parseJsonBody<AuthRefreshRequest>(event.body);
     const data = await refresh(req);
 
-    if (data.provider === "postgres") {
+    if (process.env.AUTH_PROVIDER === "postgres") {
       await writeAuditLog({
         action: "auth.refresh.rotated",
-        actorUserId: data.user.id,
-        targetUserId: data.user.id,
+        actorUserId: data.user?.id,
+        targetUserId: data.user?.id,
         requestId,
         ip: ctx.ip,
         userAgent: ctx.userAgent,
-        details: {
-          provider: data.provider
-        }
+        details: { provider: data.provider }
       });
     }
 
