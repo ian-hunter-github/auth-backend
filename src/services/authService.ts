@@ -13,37 +13,22 @@ import { fakeAuthProvider } from "./fakeAuthProvider.js";
 import { postgresAuthProvider } from "./postgresAuthProvider.js";
 
 import { getEnv } from "../lib/env.js";
-import { AppError } from "../lib/errors.js";
+import { requireRuntimeConfig } from "../security/runtimeConfig.js";
 
-export type AuthProviderName = "fake" | "postgres";
+function selectProvider(): AuthProvider {
+  // Fail-fast on bad runtime env so API callers get deterministic errors
+  // and we don't accidentally run in a partially configured state.
+  const cfg = requireRuntimeConfig();
 
-export function getSelectedAuthProviderName(): AuthProviderName {
   const explicit = getEnv("AUTH_PROVIDER");
   if (explicit) {
     const p = explicit.toLowerCase();
-    if (p === "fake") return "fake";
-    if (p === "postgres") return "postgres";
-
-    throw new AppError("Invalid AUTH_PROVIDER", {
-      code: "INTERNAL_ERROR",
-      status: 500,
-      details: { value: explicit, allowed: ["fake", "postgres"] }
-    });
+    if (p === "fake") return fakeAuthProvider;
+    if (p === "postgres") return postgresAuthProvider;
   }
 
-  // Deterministic default:
-  // - In local Netlify Dev / test harness runs, default to FAKE unless explicitly overridden.
-  // - In deployed environments, default to postgres.
-  const isNetlifyDev = (getEnv("NETLIFY_DEV") || "").toLowerCase() === "true";
-  const isTest = (getEnv("NODE_ENV") || "").toLowerCase() === "test";
-
-  if (isNetlifyDev || isTest) return "fake";
-  return "postgres";
-}
-
-function selectProvider(): AuthProvider {
-  const name = getSelectedAuthProviderName();
-  return name === "fake" ? fakeAuthProvider : postgresAuthProvider;
+  if (cfg.provider === "fake") return fakeAuthProvider;
+  return postgresAuthProvider;
 }
 
 export async function login(req: AuthLoginRequest): Promise<AuthLoginResponse> {

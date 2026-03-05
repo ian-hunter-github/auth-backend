@@ -1,5 +1,5 @@
 export type HealthResponse = {
-  status: "ok";
+  status: "ok" | "degraded";
   version: string;
   timestamp: string;
   build: {
@@ -25,6 +25,24 @@ export type HealthResponse = {
       context?: string;
       deployId?: string;
       siteId?: string;
+    };
+  };
+  diagnostics?: {
+    config: {
+      ok: boolean;
+      provider: string;
+      issues: Array<{
+        code: string;
+        message: string;
+        env?: string;
+      }>;
+    };
+    checks?: {
+      postgres?: {
+        ok: boolean;
+        latencyMs?: number;
+        error?: string;
+      };
     };
   };
 };

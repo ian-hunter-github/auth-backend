@@ -7,9 +7,10 @@ export const handler: Handler = async (event) => {
   const requestId = getOrCreateRequestId(event.headers || {});
   try {
     requireMethod(event.httpMethod, ["GET"]);
-    const data = getHealth();
+    const data = await getHealth();
     return jsonOk(200, requestId, data);
   } catch (err) {
     return toErrorResponse(requestId, err);
   }
 };
+
