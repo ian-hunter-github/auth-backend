@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export APP_ENV="${APP_ENV:-dev}"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/load-env.sh"
+
 # Hardcoded DEV-only database rebuild.
 #
 # Drops and recreates the identity schema, then reapplies ddl + seed.

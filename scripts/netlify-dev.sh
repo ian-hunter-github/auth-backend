@@ -21,6 +21,14 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export APP_ENV="${APP_ENV:-dev}"
 
+if [[ -f "$SCRIPT_DIR/load-env.sh" ]] &&    [[ -f "$SCRIPT_DIR/../environment/$APP_ENV/db/.env" ]] &&    [[ -f "$SCRIPT_DIR/../environment/$APP_ENV/server/.env" ]]; then
+  # shellcheck disable=SC1091
+  source "$SCRIPT_DIR/load-env.sh"
+else
+  echo "==> Skipping environment file load for APP_ENV=$APP_ENV (files not present)"
+fi
+
+
 if [[ -f "$SCRIPT_DIR/load-env.sh" ]] && \
    [[ -f "$SCRIPT_DIR/../environment/$APP_ENV/db/.env" ]] && \
    [[ -f "$SCRIPT_DIR/../environment/$APP_ENV/server/.env" ]]; then
