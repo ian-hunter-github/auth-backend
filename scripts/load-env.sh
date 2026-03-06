@@ -18,12 +18,35 @@ if [[ ! -f "$SERVER_ENV_FILE" ]]; then
   exit 2
 fi
 
-set -a
-# shellcheck disable=SC1090
-source "$DB_ENV_FILE"
-# shellcheck disable=SC1090
-source "$SERVER_ENV_FILE"
-set +a
+load_env_preserve_existing() {
+  local file="$1"
+  local line key value
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ -z "$line" ]] && continue
+    [[ "$line" =~ ^[[:space:]]*# ]] && continue
+    [[ "$line" != *=* ]] && continue
+
+    key="${line%%=*}"
+    value="${line#*=}"
+
+    key="$(printf '%s' "$key" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+
+    if [[ -z "$key" ]]; then
+      continue
+    fi
+
+    # Preserve caller-provided env vars
+    if [[ -n "${!key:-}" ]]; then
+      continue
+    fi
+
+    export "$key=$value"
+  done < "$file"
+}
+
+load_env_preserve_existing "$DB_ENV_FILE"
+load_env_preserve_existing "$SERVER_ENV_FILE"
 
 if [[ -n "${DB_HOST:-}" && -z "${PGHOST:-}" ]]; then
   export PGHOST="$DB_HOST"
@@ -48,4 +71,5 @@ echo "==> Loading environment: $APP_ENV"
 echo "DB_LABEL=${DB_LABEL:-unknown}"
 echo "DB_HOST=${DB_HOST:-${PGHOST:-unknown}}"
 echo "SERVER_LABEL=${SERVER_LABEL:-unknown}"
+echo "AUTH_PROVIDER=${AUTH_PROVIDER:-<unset>}"
 echo ""
