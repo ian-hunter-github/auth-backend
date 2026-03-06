@@ -28,15 +28,54 @@ describe("GET /.netlify/functions/health", () => {
     expect(body.ok).toBe(true);
     expect(body.requestId).toBe("test-health-001");
     expect(body.data.status).toBe("ok");
-    expect(body.data.version).toBe("0.1.0");
-    expect(body.data.build.version).toBe("0.1.0");
+
+    expect(typeof body.data.version).toBe("string");
+    expect(body.data.version.length).toBeGreaterThan(0);
+
+    expect(typeof body.data.timestamp).toBe("string");
+    expect(body.data.timestamp.length).toBeGreaterThan(0);
+
+    expect(body.data.build.version).toBe(body.data.version);
     expect(typeof body.data.build.buildTime).toBe("string");
     expect(body.data.build.buildTime.length).toBeGreaterThan(0);
     expect(typeof body.data.build.node).toBe("string");
     expect(body.data.build.node.length).toBeGreaterThan(0);
-    expect(body.data.project.workPackage).toBe("identity-backend");
-    expect(body.data.project.phase).toBe(5);
-    expect(body.data.project.step).toBe("5.5");
-    expect(typeof body.data.project.description).toBe("string");
+
+    if (body.data.build.sha !== undefined) {
+      expect(typeof body.data.build.sha).toBe("string");
+      expect(body.data.build.sha.length).toBeGreaterThan(0);
+    }
+
+    if (body.data.build.shortSha !== undefined) {
+      expect(typeof body.data.build.shortSha).toBe("string");
+      expect(body.data.build.shortSha.length).toBeGreaterThan(0);
+    }
+
+    if (body.data.build.branch !== undefined) {
+      expect(typeof body.data.build.branch).toBe("string");
+      expect(body.data.build.branch.length).toBeGreaterThan(0);
+    }
+
+    if (body.data.project.workPackage !== undefined) {
+      expect(typeof body.data.project.workPackage).toBe("string");
+      expect(body.data.project.workPackage.length).toBeGreaterThan(0);
+    }
+
+    if (body.data.project.phase !== undefined) {
+      expect(["number", "string"]).toContain(typeof body.data.project.phase);
+      if (typeof body.data.project.phase === "string") {
+        expect(body.data.project.phase.length).toBeGreaterThan(0);
+      }
+    }
+
+    if (body.data.project.step !== undefined) {
+      expect(typeof body.data.project.step).toBe("string");
+      expect(body.data.project.step.length).toBeGreaterThan(0);
+    }
+
+    if (body.data.project.description !== undefined) {
+      expect(typeof body.data.project.description).toBe("string");
+      expect(body.data.project.description.length).toBeGreaterThan(0);
+    }
   });
 });

@@ -16,12 +16,9 @@ export type GeneratedBuildInfo = {
 export const GENERATED_BUILD_INFO: GeneratedBuildInfo = {
   projectName: "identity-backend-service",
   version: "0.1.0",
-  buildTime: "2026-03-06T16:09:29.000Z",
-  sha: "9a850a0a33d2d274f82f034798a1c23946398611",
-  shortSha: "9a850a0",
-  branch: "main",
+  buildTime: "1970-01-01T00:00:00.000Z",
   workPackage: "identity-backend",
   phase: 5,
-  step: "5.5",
-  description: "Demo client and operational maturity",
+  step: "5.5.3",
+  description: "Environment handling, CI stabilization, and build metadata"
 };
