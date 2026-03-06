@@ -16,7 +16,8 @@
     "test:run": "vitest run",
     "ci": "npm run lint && npm run typecheck && npm run test:run",
     "check:ci": "./scripts/check-ci-local.sh",
-    "api:docs": "./scripts/api-docs.sh"
+    "api:docs": "./scripts/api-docs.sh",
+    "check:gh-ci-status": "./scripts/check-gh-ci-status.sh"
   },
   "dependencies": {
     "pg": "^8.13.1"

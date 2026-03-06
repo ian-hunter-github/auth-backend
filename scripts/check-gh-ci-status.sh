@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# check-ci.sh
+# check-gh-ci-status.sh
 #
 # Purpose:
 #   Exit 0 if the most recent GitHub Actions run for the "CI" workflow on the given branch succeeded.
 #   Exit non-zero otherwise.
 #
 # Usage:
-#   ./check-ci.sh              # checks CI on current branch
-#   ./check-ci.sh main         # checks CI on main
+#   ./scripts/check-gh-ci-status.sh
+#   ./scripts/check-gh-ci-status.sh main
 #
 # Requirements:
 #   - gh CLI authenticated (gh auth status)
@@ -24,7 +24,6 @@ if ! command -v gh >/dev/null 2>&1; then
   exit 2
 fi
 
-# Ensure we're in a git repo (best effort)
 if command -v git >/dev/null 2>&1; then
   if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     echo "ERROR: Not inside a git repository." >&2
@@ -32,7 +31,6 @@ if command -v git >/dev/null 2>&1; then
   fi
 fi
 
-# Default to current branch if none provided
 if [[ -z "$branch" ]]; then
   if command -v git >/dev/null 2>&1; then
     branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
@@ -42,14 +40,11 @@ if [[ -z "$branch" ]]; then
   branch="main"
 fi
 
-# Verify auth (non-fatal, but gives a nicer error)
 if ! gh auth status >/dev/null 2>&1; then
   echo "ERROR: gh is not authenticated. Run: gh auth login" >&2
   exit 2
 fi
 
-# Fetch latest CI run for branch
-# Fields available: status, conclusion, htmlUrl, headSha, createdAt, event, displayTitle
 status="$(gh run list --workflow "CI" --branch "$branch" --limit 1 --json status --jq '.[0].status // empty' || true)"
 conclusion="$(gh run list --workflow "CI" --branch "$branch" --limit 1 --json conclusion --jq '.[0].conclusion // empty' || true)"
 url="$(gh run list --workflow "CI" --branch "$branch" --limit 1 --json url --jq '.[0].url // empty' || true)"
@@ -60,8 +55,6 @@ if [[ -z "$status" && -z "$conclusion" ]]; then
   exit 3
 fi
 
-# `status` may be: queued, in_progress, completed
-# `conclusion` may be: success, failure, cancelled, skipped, neutral, stale, timed_out, action_required
 if [[ "$status" != "completed" ]]; then
   echo "CI is not completed yet on branch '$branch'."
   echo "  status:     $status"

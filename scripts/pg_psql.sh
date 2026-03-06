@@ -3,38 +3,25 @@ set -euo pipefail
 
 # Generic psql wrapper.
 #
-# Selects environment based on:
-#   PGSYSTEM (default: neon)
-#
 # Loads:
-#   postgres/env/${PGSYSTEM}/.env
+#   environment/${APP_ENV:-dev}/db/.env
+#   environment/${APP_ENV:-dev}/server/.env
 #
 # Usage examples:
-#   PGSYSTEM=neon scripts/pg_psql.sh
-#   scripts/pg_psql.sh -c "select 1;"
-#   PGSYSTEM=neon scripts/pg_psql.sh -f db/identity_backend/0001_init.sql
+#   ./scripts/pg_psql.sh
+#   ./scripts/pg_psql.sh -c "select 1;"
+#   APP_ENV=prod ./scripts/pg_psql.sh -c "select now();"
 
-PGSYSTEM="${PGSYSTEM:-neon}"
-ENV_FILE="postgres/env/${PGSYSTEM}/.env"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export APP_ENV="${APP_ENV:-dev}"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/load-env.sh"
 
-if [[ ! -f "$ENV_FILE" ]]; then
-  echo "ERROR: environment file not found: $ENV_FILE" >&2
-  exit 2
-fi
+: "${PGHOST:?PGHOST not set}"
+: "${PGDATABASE:?PGDATABASE not set}"
+: "${PGUSER:?PGUSER not set}"
+: "${PGPASSWORD:?PGPASSWORD not set}"
 
-# Export all variables from env file
-set -a
-# shellcheck disable=SC1090
-source "$ENV_FILE"
-set +a
-
-# Sanity checks
-: "${PGHOST:?PGHOST not set in $ENV_FILE}"
-: "${PGDATABASE:?PGDATABASE not set in $ENV_FILE}"
-: "${PGUSER:?PGUSER not set in $ENV_FILE}"
-: "${PGPASSWORD:?PGPASSWORD not set in $ENV_FILE}"
-
-# Default SSL mode if not provided
 if [[ -z "${PGSSLMODE:-}" ]]; then
   export PGSSLMODE=require
 fi
