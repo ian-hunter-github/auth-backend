@@ -20,7 +20,15 @@ fi
 # Load project environment
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export APP_ENV="${APP_ENV:-dev}"
-source "$SCRIPT_DIR/load-env.sh"
+
+if [[ -f "$SCRIPT_DIR/load-env.sh" ]] && \
+   [[ -f "$SCRIPT_DIR/../environment/$APP_ENV/db/.env" ]] && \
+   [[ -f "$SCRIPT_DIR/../environment/$APP_ENV/server/.env" ]]; then
+  # shellcheck disable=SC1091
+  source "$SCRIPT_DIR/load-env.sh"
+else
+  echo "==> Skipping environment file load for APP_ENV=$APP_ENV (files not present)"
+fi
 
 NETLIFY_PORT="${NETLIFY_PORT:-3999}"
 NETLIFY_STATIC_PORT="${NETLIFY_STATIC_PORT:-49000}"
