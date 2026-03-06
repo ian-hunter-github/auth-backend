@@ -3,9 +3,20 @@ export type HealthResponse = {
   version: string;
   timestamp: string;
   build: {
-    sha?: string;
-    buildId?: string;
+    version: string;
+    buildTime: string;
     node: string;
+    sha?: string;
+    shortSha?: string;
+    buildId?: string;
+    branch?: string;
+    appEnv?: string;
+  };
+  project: {
+    workPackage?: string;
+    phase?: number | string;
+    step?: string;
+    description?: string;
   };
   env: {
     authProvider?: string;
@@ -24,4 +35,3 @@ export type HealthResponse = {
     };
   };
 };
-

@@ -18,7 +18,8 @@
     "check:ci": "./scripts/check-ci-local.sh",
     "api:docs": "./scripts/api-docs.sh",
     "check:gh-ci-status": "./scripts/check-gh-ci-status.sh",
-    "check:pg-local": "./scripts/check-pg-local.sh"
+    "check:pg-local": "./scripts/check-pg-local.sh",
+    "build:info": "./scripts/generate-build-info.sh"
   },
   "dependencies": {
     "pg": "^8.13.1"

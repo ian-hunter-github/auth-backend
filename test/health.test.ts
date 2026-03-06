@@ -14,7 +14,7 @@ beforeAll(() => {
 describe("GET /.netlify/functions/health", () => {
   it("returns ok envelope", async () => {
     const res = await fetch(`${baseUrl}/.netlify/functions/health`, {
-      headers: { "x-request-id": "test-health-001" },
+      headers: { "x-request-id": "test-health-001" }
     });
 
     expect(res.status).toBe(200);
@@ -28,6 +28,15 @@ describe("GET /.netlify/functions/health", () => {
     expect(body.ok).toBe(true);
     expect(body.requestId).toBe("test-health-001");
     expect(body.data.status).toBe("ok");
+    expect(body.data.version).toBe("0.1.0");
+    expect(body.data.build.version).toBe("0.1.0");
+    expect(typeof body.data.build.buildTime).toBe("string");
+    expect(body.data.build.buildTime.length).toBeGreaterThan(0);
+    expect(typeof body.data.build.node).toBe("string");
+    expect(body.data.build.node.length).toBeGreaterThan(0);
+    expect(body.data.project.workPackage).toBe("identity-backend");
+    expect(body.data.project.phase).toBe(5);
+    expect(body.data.project.step).toBe("5.5");
+    expect(typeof body.data.project.description).toBe("string");
   });
 });
-
