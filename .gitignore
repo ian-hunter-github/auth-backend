@@ -8,3 +8,4 @@ coverage/
 aichat_admin/
 .neon.env
 .env.local
+environment/**/.env

@@ -17,6 +17,11 @@ if ! command -v netlify >/dev/null 2>&1; then
   exit 2
 fi
 
+# Load project environment
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export APP_ENV="${APP_ENV:-dev}"
+source "$SCRIPT_DIR/load-env.sh"
+
 NETLIFY_PORT="${NETLIFY_PORT:-3999}"
 NETLIFY_STATIC_PORT="${NETLIFY_STATIC_PORT:-49000}"
 

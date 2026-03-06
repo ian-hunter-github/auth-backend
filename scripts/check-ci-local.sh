@@ -16,6 +16,10 @@ set -euo pipefail
 # - Default uses `npm ci` for parity with CI.
 # - If you want faster iteration after you've already installed deps, use --no-install.
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export APP_ENV="${APP_ENV:-dev}"
+source "$SCRIPT_DIR/load-env.sh"
+
 NO_INSTALL=0
 NO_LINT=0
 NO_TYPECHECK=0
