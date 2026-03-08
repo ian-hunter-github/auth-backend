@@ -26,7 +26,7 @@ describe("rate limiting", () => {
       })
     });
 
-    expect(registerRes.status).toBe(200);
+    expect(registerRes.status).toBe(201);
     const registerBody = (await registerRes.json()) as SuccessEnvelope<AuthRegisterResponse>;
     expect(registerBody.ok).toBe(true);
 
