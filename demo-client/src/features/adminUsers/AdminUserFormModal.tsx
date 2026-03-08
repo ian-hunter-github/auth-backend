@@ -1,8 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Alert, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, TextField } from "@mui/material";
 import type { ApiError } from "../../api/apiClient";
-import type { AdminCreateUserRequest, AdminUpdateUserRequest } from "../../types/adminUsersTypes";
-import type { AuthUserProfile } from "../../types/authTypes";
+import type { AdminCreateUserRequest, AdminUpdateUserRequest, AuthUserProfile } from "../../lib/identity-client";
 
 function splitRoles(v: string): string[] | undefined {
   const parts = v

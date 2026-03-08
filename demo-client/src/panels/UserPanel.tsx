@@ -1,132 +1,63 @@
-import React, { useEffect, useState } from "react";
+import React from "react";
 import {
   Alert,
   Box,
-  Button,
-  Chip,
-  Divider,
-  FormControlLabel,
-  Paper,
-  Stack,
-  Switch,
-  Typography
+  Button
 } from "@mui/material";
-import { useAuth } from "../auth/useAuth";
 import { LoginModal } from "../components/LoginModal";
 import { JsonViewer } from "../components/JsonViewer";
-import { usePanelApis } from "../hooks/useApi";
-import type { ApiError } from "../api/apiClient";
-import type { MeResponse } from "../types/meTypes";
 import { useDebug } from "../debug/DebugContext";
-import { DebugLogViewer } from "../components/DebugLogViewer";
 import { getFunctionsBaseUrl } from "../config";
+import { useUserPanelModel } from "../hooks/useUserPanelModel";
+import { SessionPanelChrome } from "../components/SessionPanelChrome";
+import { SessionPanelBody } from "../components/SessionPanelBody";
 
 export function UserPanel() {
-  const auth = useAuth();
   const dbg = useDebug();
-  const { userApi } = usePanelApis();
-
-  const [loginOpen, setLoginOpen] = useState(false);
-  const [me, setMe] = useState<MeResponse | undefined>(undefined);
-  const [panelError, setPanelError] = useState<ApiError | undefined>(undefined);
-
-  useEffect(() => {
-    if (!auth.isLoggedIn) {
-      setMe(undefined);
-      setPanelError(undefined);
-    }
-  }, [auth.isLoggedIn]);
-
-  async function doLogin(username: string, password: string) {
-    await auth.login(username, password);
-    setLoginOpen(false);
-  }
-
-  async function fetchMe() {
-    setPanelError(undefined);
-    try {
-      const res = await userApi.me();
-      setMe(res);
-    } catch (err) {
-      setPanelError(err as ApiError);
-      setMe(undefined);
-    }
-  }
+  const vm = useUserPanelModel();
 
   return (
-    <Paper sx={{ p: 2, height: "100%", display: "grid", gridTemplateRows: "auto auto 1fr", gap: 1.5 }}>
-      <Box>
-        <Typography variant="h6">User Panel</Typography>
-        <Typography variant="body2" color="text.secondary">
-          Independent session: <code>auth.user.*</code>
-        </Typography>
-        <Typography variant="caption" color="text.secondary">
-          Functions base: <code>{getFunctionsBaseUrl()}</code>
-        </Typography>
-      </Box>
-
-      <Stack direction="row" spacing={1} alignItems="center" sx={{ flexWrap: "wrap" }}>
-        {auth.isLoggedIn ? (
-          <Chip label="Logged in" color="success" size="small" />
-        ) : (
-          <Chip label="Logged out" color="default" size="small" />
-        )}
-        {auth.user?.username ? <Chip label={auth.user.username} size="small" /> : null}
-        {auth.user?.roles?.length ? <Chip label={(auth.user.roles || []).join(", ")} size="small" /> : null}
-
-        <FormControlLabel
-          control={<Switch size="small" checked={dbg.enabled} onChange={(e) => dbg.setEnabled(e.target.checked)} />}
-          label="Debug"
-          sx={{ ml: 0.5 }}
-        />
-
-        <Box sx={{ flex: 1 }} />
-
-        {!auth.isLoggedIn ? (
-          <Button variant="contained" onClick={() => setLoginOpen(true)}>
-            Login
-          </Button>
-        ) : (
-          <Stack direction="row" spacing={1}>
-            <Button variant="outlined" onClick={() => void auth.refresh()} disabled={auth.busy}>
-              Refresh
-            </Button>
-            <Button variant="contained" onClick={() => void fetchMe()} disabled={auth.busy}>
-              Fetch /me
-            </Button>
-            <Button variant="contained" color="error" onClick={() => void auth.logout()} disabled={auth.busy}>
-              Logout
-            </Button>
-          </Stack>
-        )}
-      </Stack>
-
-      <Box sx={{ minHeight: 0, display: "grid", gridTemplateRows: "auto auto auto 1fr", gap: 1 }}>
-        {auth.lastError ? <Alert severity="error">{`${auth.lastError.code}: ${auth.lastError.message}`}</Alert> : null}
-        {panelError ? <Alert severity="error">{`${panelError.code}: ${panelError.message}`}</Alert> : null}
-
-        <DebugLogViewer />
-
-        <Divider />
-
+    <SessionPanelChrome
+      title="User Panel"
+      sessionKeyLabel="auth.user.*"
+      functionsBaseUrl={getFunctionsBaseUrl()}
+      isLoggedIn={vm.auth.isLoggedIn}
+      {...(vm.auth.user?.username ? { username: vm.auth.user.username } : {})}
+      {...(vm.auth.user?.roles?.length ? { roles: vm.auth.user.roles } : {})}
+      debugEnabled={dbg.enabled}
+      onDebugEnabledChange={dbg.setEnabled}
+      onLogin={() => vm.setLoginOpen(true)}
+      onRefresh={() => void vm.auth.refresh()}
+      onLogout={() => void vm.auth.logout()}
+      busy={vm.auth.busy}
+      actions={
+        <Button variant="contained" onClick={() => void vm.fetchMe()} disabled={vm.auth.busy}>
+          Fetch /me
+        </Button>
+      }
+    >
+      <SessionPanelBody
+        {...(vm.auth.lastError ? { authError: vm.auth.lastError } : {})}
+        {...(vm.panelError ? { panelError: vm.panelError } : {})}
+      >
         <Box sx={{ minHeight: 0 }}>
-          {me ? (
-            <JsonViewer value={me} />
+          {vm.me ? (
+            <JsonViewer value={vm.me} />
           ) : (
             <Alert severity="info">Login and click “Fetch /me” to view the authenticated profile JSON.</Alert>
           )}
         </Box>
-      </Box>
+      </SessionPanelBody>
 
       <LoginModal
-        open={loginOpen}
+        open={vm.loginOpen}
         title="User Login"
         defaultUsername="user@example.com"
-        onClose={() => setLoginOpen(false)}
-        onSubmit={doLogin}
-        busy={auth.busy}
-        {...(auth.lastError ? { error: auth.lastError } : {})}
+        onClose={() => vm.setLoginOpen(false)}
+        onSubmit={vm.doLogin}
+        busy={vm.auth.busy}
+        {...(vm.auth.lastError ? { error: vm.auth.lastError } : {})}
       />
-    </Paper>
+    </SessionPanelChrome>
   );
 }
