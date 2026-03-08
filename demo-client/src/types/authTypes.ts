@@ -20,6 +20,8 @@ export type AuthLoginResponse = {
   user: AuthUserProfile;
 };
 
+export type AuthRegisterResponse = AuthLoginResponse;
+
 export type AuthRefreshResponse = AuthLoginResponse;
 
 export type AuthLoginRequest = {

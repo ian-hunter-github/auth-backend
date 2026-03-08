@@ -53,18 +53,20 @@ export function AdminUserFormModal(props: {
 
   async function submit() {
     if (props.mode === "create") {
+      const nextRoles = splitRoles(roles);
       await props.onCreate({
         email: email.trim(),
         password,
         ...(displayName.trim() ? { displayName: displayName.trim() } : {}),
-        ...(splitRoles(roles) ? { roles: splitRoles(roles) } : {})
+        ...(nextRoles ? { roles: nextRoles } : {})
       });
       return;
     }
 
+    const nextRoles = splitRoles(roles);
     await props.onUpdate({
       ...(displayName.trim() ? { displayName: displayName.trim() } : {}),
-      ...(splitRoles(roles) ? { roles: splitRoles(roles) } : {})
+      ...(nextRoles ? { roles: nextRoles } : {})
     });
   }
 

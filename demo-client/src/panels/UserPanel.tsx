@@ -125,7 +125,7 @@ export function UserPanel() {
         onClose={() => setLoginOpen(false)}
         onSubmit={doLogin}
         busy={auth.busy}
-        error={auth.lastError}
+        {...(auth.lastError ? { error: auth.lastError } : {})}
       />
     </Paper>
   );

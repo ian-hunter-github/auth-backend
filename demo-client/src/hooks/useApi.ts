@@ -22,9 +22,9 @@ export function usePanelApis() {
                 status: e.status,
                 ms: e.ms,
                 ok: e.ok,
-                requestBody: e.requestBody,
-                responseBody: e.responseBody,
-                errorMessage: e.errorMessage
+                ...(e.requestBody !== undefined ? { requestBody: e.requestBody } : {}),
+                ...(e.responseBody !== undefined ? { responseBody: e.responseBody } : {}),
+                ...(e.errorMessage !== undefined ? { errorMessage: e.errorMessage } : {})
               })
           : undefined
       ),

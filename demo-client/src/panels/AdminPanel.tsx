@@ -9,7 +9,7 @@ import {
   Paper,
   Stack,
   Switch,
-  Typography,
+  Typography
 } from "@mui/material";
 import { useAuth } from "../auth/useAuth";
 import { LoginModal } from "../components/LoginModal";
@@ -218,7 +218,7 @@ export function AdminPanel() {
         onClose={() => setLoginOpen(false)}
         onSubmit={doLogin}
         busy={auth.busy}
-        error={auth.lastError}
+        {...(auth.lastError ? { error: auth.lastError } : {})}
       />
 
       <AdminUserFormModal
@@ -228,18 +228,18 @@ export function AdminPanel() {
         onCreate={doCreate}
         onUpdate={async () => {}}
         busy={auth.busy}
-        error={formError}
+        {...(formError ? { error: formError } : {})}
       />
 
       <AdminUserFormModal
         open={!!editUser}
         mode="edit"
-        initialUser={editUser}
+        {...(editUser ? { initialUser: editUser } : {})}
         onClose={() => setEditUser(undefined)}
         onCreate={async () => {}}
         onUpdate={doUpdate}
         busy={auth.busy}
-        error={formError}
+        {...(formError ? { error: formError } : {})}
       />
     </Paper>
   );

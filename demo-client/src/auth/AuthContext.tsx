@@ -56,9 +56,9 @@ export function AuthProvider(props: { sessionKey: string; children: React.ReactN
                 status: e.status,
                 ms: e.ms,
                 ok: e.ok,
-                requestBody: e.requestBody,
-                responseBody: e.responseBody,
-                errorMessage: e.errorMessage
+                ...(e.requestBody !== undefined ? { requestBody: e.requestBody } : {}),
+                ...(e.responseBody !== undefined ? { responseBody: e.responseBody } : {}),
+                ...(e.errorMessage !== undefined ? { errorMessage: e.errorMessage } : {})
               })
           : undefined
       ),
@@ -99,7 +99,6 @@ export function AuthProvider(props: { sessionKey: string; children: React.ReactN
       const refreshToken = session?.refreshToken;
       await authApi.logout(refreshToken ? { refreshToken } : {});
     } catch (err) {
-      // Logout failing shouldn't trap user; still clear locally.
       setLastError(err as ApiError);
     } finally {
       clearLocal();
@@ -133,14 +132,14 @@ export function AuthProvider(props: { sessionKey: string; children: React.ReactN
   const value: AuthState = useMemo(
     () => ({
       sessionKey,
-      session,
-      user,
+      ...(session ? { session } : {}),
+      ...(user ? { user } : {}),
       isLoggedIn: !!session?.accessToken,
       login,
       logout,
       refresh,
       clearLocal,
-      lastError,
+      ...(lastError ? { lastError } : {}),
       busy
     }),
     [sessionKey, session, user, login, logout, refresh, clearLocal, lastError, busy]

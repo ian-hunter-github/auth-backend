@@ -57,8 +57,8 @@ function toApiError(status: number, body: unknown): ApiError {
       status,
       code: body.error.code,
       message: body.error.message,
-      details: body.error.details,
-      requestId: body.requestId
+      ...(body.error.details !== undefined ? { details: body.error.details } : {}),
+      ...(body.requestId !== undefined ? { requestId: body.requestId } : {})
     };
   }
 
@@ -66,7 +66,7 @@ function toApiError(status: number, body: unknown): ApiError {
     status,
     code: "HTTP_ERROR",
     message: typeof body === "string" ? body : "Request failed",
-    details: typeof body === "string" ? undefined : body
+    ...(typeof body === "string" ? {} : { details: body })
   };
 }
 
@@ -131,8 +131,8 @@ export function createApiClient(getAccessToken: () => string | undefined, logger
           status: res.status,
           ms,
           ok: false,
-          requestBody: body,
-          responseBody: parsed
+          ...(body !== undefined ? { requestBody: body } : {}),
+          ...(parsed !== undefined ? { responseBody: parsed } : {})
         });
 
         throw toApiError(res.status, parsed);
@@ -145,8 +145,8 @@ export function createApiClient(getAccessToken: () => string | undefined, logger
         status: res.status,
         ms,
         ok: true,
-        requestBody: body,
-        responseBody: parsed
+        ...(body !== undefined ? { requestBody: body } : {}),
+        ...(parsed !== undefined ? { responseBody: parsed } : {})
       });
 
       return unwrapEnvelope<T>(res.status, parsed) as T;
@@ -161,9 +161,9 @@ export function createApiClient(getAccessToken: () => string | undefined, logger
           status: 0,
           ms,
           ok: false,
-          requestBody: body,
+          ...(body !== undefined ? { requestBody: body } : {}),
           responseBody: null,
-          errorMessage: err instanceof Error ? err.message : String(err)
+          ...(err instanceof Error ? { errorMessage: err.message } : { errorMessage: String(err) })
         });
       }
 
