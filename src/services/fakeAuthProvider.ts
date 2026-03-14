@@ -492,6 +492,14 @@ export const fakeAuthProvider: AuthProvider = {
     await saveUserStore(store);
 
     await revokeSessionsForUser(id);
+  },
+
+  revokeUserSessions: async (id: string): Promise<void> => {
+    await ensureSeedUsers();
+    const store = await loadUserStore();
+    const existing = store.usersById[id];
+    if (!existing || existing.deletedAt) throw new AppError("Not found", { code: "NOT_FOUND", status: 404 });
+    await revokeSessionsForUser(id);
   }
 };
 

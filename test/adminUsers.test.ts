@@ -267,4 +267,58 @@ describe("admin users (/.netlify/functions/admin-users)", () => {
     const refreshAfterBody = (await refreshAfterRes.json()) as ErrorEnvelope | SuccessEnvelope<AuthRefreshResponse>;
     expect(refreshAfterBody.ok).toBe(false);
   });
+
+  it("admin can revoke all sessions for a user without deleting the account", async () => {
+    const adminAccess = (await loginOk("demo", "letmein", "admin-revoke-login-admin")).session.accessToken;
+
+    const email = uniqueEmail("revoke-sessions");
+
+    const createRes = await fetch(`${baseUrl}/.netlify/functions/admin-users`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${adminAccess}`,
+        "content-type": "application/json",
+        "x-request-id": "admin-revoke-create-201"
+      },
+      body: JSON.stringify({
+        email,
+        password: "letmein",
+        displayName: "Revoke Target"
+      } satisfies AdminCreateUserRequest)
+    });
+    expect(createRes.status).toBe(201);
+    const createBody = (await createRes.json()) as SuccessEnvelope<AdminUserResponse>;
+    const userId = createBody.data.user.id;
+
+    // Login as the new user to get a session
+    const userLogin = await loginOk(email, "letmein", "admin-revoke-user-login");
+    const refreshToken = userLogin.session.refreshToken!;
+
+    // Non-admin cannot revoke sessions
+    const userAccess = (await loginOk("user@example.com", "letmein", "admin-revoke-nonadmin-login")).session.accessToken;
+    const forbiddenRes = await fetch(`${baseUrl}/.netlify/functions/admin-users/${userId}/sessions`, {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${userAccess}`, "x-request-id": "admin-revoke-403" }
+    });
+    expect(forbiddenRes.status).toBe(403);
+
+    // Admin revokes sessions
+    const revokeRes = await fetch(`${baseUrl}/.netlify/functions/admin-users/${userId}/sessions`, {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${adminAccess}`, "x-request-id": "admin-revoke-204" }
+    });
+    expect(revokeRes.status).toBe(204);
+
+    // Old refresh token is now invalid
+    const refreshAfterRes = await fetch(`${baseUrl}/.netlify/functions/auth-refresh`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-request-id": "admin-revoke-refresh-401" },
+      body: JSON.stringify({ refreshToken })
+    });
+    expect(refreshAfterRes.status).toBe(401);
+
+    // But the account still exists — user can login fresh
+    const reLoginRes = await login(email, "letmein", "admin-revoke-relogin");
+    expect(reLoginRes.status).toBe(200);
+  });
 });

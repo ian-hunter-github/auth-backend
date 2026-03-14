@@ -564,5 +564,18 @@ export const postgresAuthProvider: AuthProvider = {
         throw new AppError("Not found", { code: "NOT_FOUND", status: 404 });
       }
     }
+  },
+
+  revokeUserSessions: async (userId: string): Promise<void> => {
+    if (!isUuid(userId)) throw new AppError("Not found", { code: "NOT_FOUND", status: 404 });
+
+    const p = getPool();
+    const { rows } = await p.query<{ id: string }>(
+      "select id from identity.users where id = $1::uuid and deleted_at is null limit 1",
+      [userId]
+    );
+    if (!rows[0]) throw new AppError("Not found", { code: "NOT_FOUND", status: 404 });
+
+    await revokeSessionsByUserId(userId);
   }
 };

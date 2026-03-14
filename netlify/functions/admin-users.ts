@@ -17,21 +17,27 @@ import {
   deleteAdminUser,
   getAdminUserById,
   getAdminUsers,
+  revokeAdminUserSessions,
   updateAdminUser
 } from "../../src/services/adminUsersService.js";
 
-function getIdFromPath(pathname: string | undefined): string | undefined {
+function getPathParts(pathname: string | undefined): { id?: string; action?: string } {
   const p = (pathname || "").trim();
-  if (!p) return undefined;
+  if (!p) return {};
 
   const marker = "/.netlify/functions/admin-users";
   const i = p.indexOf(marker);
-  if (i < 0) return undefined;
+  if (i < 0) return {};
 
   const rest = p.slice(i + marker.length);
   const seg = rest.startsWith("/") ? rest.slice(1) : rest;
-  const id = seg.split("/")[0];
-  return id && id.trim().length > 0 ? id.trim() : undefined;
+  const parts = seg.split("/");
+  const idVal = parts[0] && parts[0].trim().length > 0 ? parts[0].trim() : "";
+  const actionVal = parts[1] && parts[1].trim().length > 0 ? parts[1].trim() : "";
+  return {
+    ...(idVal ? { id: idVal } : {}),
+    ...(actionVal ? { action: actionVal } : {})
+  };
 }
 
 export const handler: Handler = async (event) => {
@@ -44,7 +50,7 @@ export const handler: Handler = async (event) => {
     requireMethod(event.httpMethod, ["GET", "POST", "PATCH", "DELETE"]);
 
     const token = getBearerToken(event.headers || {});
-    const id = getIdFromPath(event.path);
+    const { id, action } = getPathParts(event.path);
 
     if (event.httpMethod === "GET") {
       if (id) {
@@ -78,6 +84,14 @@ export const handler: Handler = async (event) => {
     if (!id) {
       return jsonBadRequest(requestId, "Missing user id");
     }
+
+    // DELETE /admin-users/:id/sessions — revoke all sessions for a user
+    if (action === "sessions") {
+      await revokeAdminUserSessions(token, id);
+      return jsonNoContent(204, requestId);
+    }
+
+    // DELETE /admin-users/:id — soft delete user
     await deleteAdminUser(token, id);
     return jsonNoContent(204, requestId);
   } catch (err) {
