@@ -14,11 +14,13 @@ import {
 } from "@mui/material";
 import EditIcon from "@mui/icons-material/Edit";
 import DeleteIcon from "@mui/icons-material/Delete";
+import BlockIcon from "@mui/icons-material/Block";
 
 export function AdminUsersTable(props: {
   users: AuthUserProfile[];
   onEdit: (u: AuthUserProfile) => void;
   onDelete: (u: AuthUserProfile) => void;
+  onRevokeSession: (u: AuthUserProfile) => void;
 }) {
   return (
     <Box sx={{ overflow: "auto", border: "1px solid", borderColor: "divider", borderRadius: 1 }}>
@@ -29,7 +31,7 @@ export function AdminUsersTable(props: {
             <TableCell sx={{ whiteSpace: "nowrap" }}>Email</TableCell>
             <TableCell sx={{ whiteSpace: "nowrap" }}>Display name</TableCell>
             <TableCell sx={{ whiteSpace: "nowrap" }}>Roles</TableCell>
-            <TableCell sx={{ width: 96, textAlign: "right" }}>Actions</TableCell>
+            <TableCell sx={{ width: 120, textAlign: "right" }}>Actions</TableCell>
           </TableRow>
         </TableHead>
         <TableBody>
@@ -44,6 +46,11 @@ export function AdminUsersTable(props: {
                   <Tooltip title="Edit">
                     <IconButton size="small" onClick={() => props.onEdit(u)}>
                       <EditIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                  <Tooltip title="Revoke all sessions">
+                    <IconButton size="small" onClick={() => props.onRevokeSession(u)}>
+                      <BlockIcon fontSize="small" />
                     </IconButton>
                   </Tooltip>
                   <Tooltip title="Delete">

@@ -75,6 +75,7 @@ export function AdminPanel() {
                 vm.setEditUser(u);
               }}
               onDelete={(u) => void vm.doDelete(u)}
+              onRevokeSession={(u) => void vm.doRevokeSession(u)}
             />
           </Box>
         ) : (

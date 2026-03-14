@@ -5,6 +5,7 @@ import {
   Button
 } from "@mui/material";
 import { LoginModal } from "../components/LoginModal";
+import { EditProfileModal } from "../components/EditProfileModal";
 import { JsonViewer } from "../components/JsonViewer";
 import { useDebug } from "../debug/DebugContext";
 import { getFunctionsBaseUrl } from "../config";
@@ -31,9 +32,21 @@ export function UserPanel() {
       onLogout={() => void vm.auth.logout()}
       busy={vm.auth.busy}
       actions={
-        <Button variant="contained" onClick={() => void vm.fetchMe()} disabled={vm.auth.busy}>
-          Fetch /me
-        </Button>
+        <Box sx={{ display: "flex", gap: 1 }}>
+          <Button variant="contained" onClick={() => void vm.fetchMe()} disabled={vm.auth.busy}>
+            Fetch /me
+          </Button>
+          <Button
+            variant="outlined"
+            onClick={() => {
+              vm.setProfileError(undefined);
+              vm.setEditProfileOpen(true);
+            }}
+            disabled={vm.auth.busy || !vm.auth.isLoggedIn}
+          >
+            Edit profile
+          </Button>
+        </Box>
       }
     >
       <SessionPanelBody
@@ -44,7 +57,7 @@ export function UserPanel() {
           {vm.me ? (
             <JsonViewer value={vm.me} />
           ) : (
-            <Alert severity="info">Login and click “Fetch /me” to view the authenticated profile JSON.</Alert>
+            <Alert severity="info">Login and click "Fetch /me" to view the authenticated profile JSON.</Alert>
           )}
         </Box>
       </SessionPanelBody>
@@ -57,6 +70,15 @@ export function UserPanel() {
         onSubmit={vm.doLogin}
         busy={vm.auth.busy}
         {...(vm.auth.lastError ? { error: vm.auth.lastError } : {})}
+      />
+
+      <EditProfileModal
+        open={vm.editProfileOpen}
+        {...(vm.auth.user ? { initialUser: vm.auth.user } : {})}
+        onClose={() => vm.setEditProfileOpen(false)}
+        onSave={vm.doUpdateMe}
+        busy={vm.auth.busy}
+        {...(vm.profileError ? { error: vm.profileError } : {})}
       />
     </SessionPanelChrome>
   );

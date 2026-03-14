@@ -10,6 +10,13 @@ export type AuthUserProfile = {
   username: string;
   displayName: string;
   roles: string[];
+  givenName?: string;
+  familyName?: string;
+  avatarUrl?: string;
+  bio?: string;
+  phoneNumber?: string;
+  locale: string;
+  timezone: string;
 };
 
 export type AuthProviderId = "fake" | "postgres" | "google" | "github";

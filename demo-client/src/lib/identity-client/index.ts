@@ -19,6 +19,7 @@ export type {
   AuthUserProfile,
   AuthProviderId,
   MeResponse,
+  UpdateMeRequest,
   AdminCreateUserRequest,
   AdminUpdateUserRequest
 } from "./types";

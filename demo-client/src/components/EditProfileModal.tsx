@@ -1,36 +1,17 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Alert, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, TextField } from "@mui/material";
-import type { ApiError } from "../../api/apiClient";
-import type { AdminCreateUserRequest, AdminUpdateUserRequest, AuthUserProfile } from "../../lib/identity-client";
+import type { ApiError } from "../api/apiClient";
+import type { AuthUserProfile, UpdateMeRequest } from "../lib/identity-client";
 
-function splitRoles(v: string): string[] | undefined {
-  const parts = v
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  return parts.length ? parts : undefined;
-}
-
-function joinRoles(v: string[] | undefined): string {
-  return (v || []).join(", ");
-}
-
-export function AdminUserFormModal(props: {
+export function EditProfileModal(props: {
   open: boolean;
-  mode: "create" | "edit";
   initialUser?: AuthUserProfile;
   onClose: () => void;
-  onCreate: (req: AdminCreateUserRequest) => Promise<void>;
-  onUpdate: (req: AdminUpdateUserRequest) => Promise<void>;
+  onSave: (req: UpdateMeRequest) => Promise<void>;
   busy?: boolean;
   error?: ApiError;
 }) {
-  const title = useMemo(() => (props.mode === "create" ? "Create User" : "Edit User"), [props.mode]);
-
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
-  const [roles, setRoles] = useState("user");
   const [givenName, setGivenName] = useState("");
   const [familyName, setFamilyName] = useState("");
   const [avatarUrl, setAvatarUrl] = useState("");
@@ -41,27 +22,8 @@ export function AdminUserFormModal(props: {
 
   useEffect(() => {
     if (!props.open) return;
-
-    if (props.mode === "create") {
-      setEmail("");
-      setPassword("");
-      setDisplayName("");
-      setRoles("user");
-      setGivenName("");
-      setFamilyName("");
-      setAvatarUrl("");
-      setBio("");
-      setPhoneNumber("");
-      setLocale("");
-      setTimezone("");
-      return;
-    }
-
     const u = props.initialUser;
-    setEmail(u?.username || "");
-    setPassword("");
     setDisplayName(u?.displayName || "");
-    setRoles(joinRoles(u?.roles));
     setGivenName(u?.givenName || "");
     setFamilyName(u?.familyName || "");
     setAvatarUrl(u?.avatarUrl || "");
@@ -69,31 +31,11 @@ export function AdminUserFormModal(props: {
     setPhoneNumber(u?.phoneNumber || "");
     setLocale(u?.locale || "");
     setTimezone(u?.timezone || "");
-  }, [props.open, props.mode, props.initialUser]);
+  }, [props.open, props.initialUser]);
 
   async function submit() {
-    if (props.mode === "create") {
-      const nextRoles = splitRoles(roles);
-      await props.onCreate({
-        email: email.trim(),
-        password,
-        ...(displayName.trim() ? { displayName: displayName.trim() } : {}),
-        ...(nextRoles ? { roles: nextRoles } : {}),
-        ...(givenName.trim() ? { givenName: givenName.trim() } : {}),
-        ...(familyName.trim() ? { familyName: familyName.trim() } : {}),
-        ...(avatarUrl.trim() ? { avatarUrl: avatarUrl.trim() } : {}),
-        ...(bio.trim() ? { bio: bio.trim() } : {}),
-        ...(phoneNumber.trim() ? { phoneNumber: phoneNumber.trim() } : {}),
-        ...(locale.trim() ? { locale: locale.trim() } : {}),
-        ...(timezone.trim() ? { timezone: timezone.trim() } : {})
-      });
-      return;
-    }
-
-    const nextRoles = splitRoles(roles);
-    await props.onUpdate({
+    await props.onSave({
       ...(displayName.trim() ? { displayName: displayName.trim() } : {}),
-      ...(nextRoles ? { roles: nextRoles } : {}),
       ...(givenName.trim() ? { givenName: givenName.trim() } : {}),
       ...(familyName.trim() ? { familyName: familyName.trim() } : {}),
       ...(avatarUrl.trim() ? { avatarUrl: avatarUrl.trim() } : {}),
@@ -104,37 +46,12 @@ export function AdminUserFormModal(props: {
     });
   }
 
-  const canSubmit = props.mode === "create" ? !!email.trim() && !!password : true;
-
   return (
     <Dialog open={props.open} onClose={props.busy ? undefined : props.onClose} maxWidth="sm" fullWidth>
-      <DialogTitle>{title}</DialogTitle>
+      <DialogTitle>Edit Profile</DialogTitle>
       <DialogContent>
         <Box sx={{ display: "grid", gap: 2, pt: 1 }}>
           {props.error ? <Alert severity="error">{`${props.error.code}: ${props.error.message}`}</Alert> : null}
-
-          {props.mode === "create" ? (
-            <TextField
-              label="Email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              disabled={!!props.busy}
-              fullWidth
-            />
-          ) : (
-            <TextField label="Email" value={email} disabled fullWidth />
-          )}
-
-          {props.mode === "create" ? (
-            <TextField
-              label="Password"
-              value={password}
-              type="password"
-              onChange={(e) => setPassword(e.target.value)}
-              disabled={!!props.busy}
-              fullWidth
-            />
-          ) : null}
 
           <TextField
             label="Display name"
@@ -142,15 +59,6 @@ export function AdminUserFormModal(props: {
             onChange={(e) => setDisplayName(e.target.value)}
             disabled={!!props.busy}
             fullWidth
-          />
-
-          <TextField
-            label="Roles (comma separated)"
-            value={roles}
-            onChange={(e) => setRoles(e.target.value)}
-            disabled={!!props.busy}
-            fullWidth
-            helperText="Examples: user   or   admin, user"
           />
 
           <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2 }}>
@@ -220,8 +128,8 @@ export function AdminUserFormModal(props: {
         <Button onClick={props.onClose} disabled={!!props.busy}>
           Cancel
         </Button>
-        <Button variant="contained" onClick={() => void submit()} disabled={!!props.busy || !canSubmit}>
-          {props.mode === "create" ? "Create" : "Save"}
+        <Button variant="contained" onClick={() => void submit()} disabled={!!props.busy}>
+          Save
         </Button>
       </DialogActions>
     </Dialog>

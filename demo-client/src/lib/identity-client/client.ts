@@ -14,6 +14,7 @@ import type {
   IdentityClientOptions,
   IdentitySessionState,
   MeResponse,
+  UpdateMeRequest,
   TokenStore
 } from "./types";
 
@@ -356,6 +357,21 @@ export function createIdentityClient(options: IdentityClientOptions = {}): Ident
     return result;
   }
 
+  async function updateMe(req: UpdateMeRequest): Promise<MeResponse> {
+    const result = await request<MeResponse>("PATCH", "/me", req, {
+      headers: { "x-request-id": "identity-client-me-update" }
+    });
+
+    const current = getSession();
+    setSession({
+      ...(current?.session ? { session: current.session } : {}),
+      user: result.user,
+      ...(current?.provider ? { provider: current.provider } : {})
+    });
+
+    return result;
+  }
+
   async function listUsers(): Promise<AuthUserProfile[]> {
     const result = await request<{ users: AuthUserProfile[] }>("GET", "/admin-users", undefined, {
       headers: { "x-request-id": "identity-client-admin-users-list" }
@@ -404,17 +420,28 @@ export function createIdentityClient(options: IdentityClientOptions = {}): Ident
     });
   }
 
+  async function revokeUserSessions(userId: string): Promise<void> {
+    await request<unknown>(
+      "DELETE",
+      `/admin-users/${encodeURIComponent(userId)}/sessions`,
+      undefined,
+      { headers: { "x-request-id": "identity-client-admin-revoke-sessions" } }
+    );
+  }
+
   return {
     login,
     register,
     refresh,
     logout,
     getMe,
+    updateMe,
     listUsers,
     getUser,
     createUser,
     updateUser,
     deleteUser,
+    revokeUserSessions,
     getSession,
     setSession,
     clearSession

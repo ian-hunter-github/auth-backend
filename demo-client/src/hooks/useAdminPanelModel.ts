@@ -81,6 +81,18 @@ export function useAdminPanelModel() {
     }
   }
 
+  async function doRevokeSession(u: AuthUserProfile) {
+    const ok = window.confirm(`Revoke all sessions for user?\n\n${u.username}\n${u.id}`);
+    if (!ok) return;
+
+    setPanelError(undefined);
+    try {
+      await client.revokeUserSessions(u.id);
+    } catch (err) {
+      setPanelError(toPanelError(err));
+    }
+  }
+
   return {
     auth,
     loginOpen,
@@ -98,6 +110,7 @@ export function useAdminPanelModel() {
     doLogin,
     doCreate,
     doUpdate,
-    doDelete
+    doDelete,
+    doRevokeSession
   };
 }

@@ -9,7 +9,7 @@ import type {
   AuthUserProfile,
   AuthProviderId
 } from "../../types/authTypes";
-import type { MeResponse } from "../../types/meTypes";
+import type { MeResponse, UpdateMeRequest } from "../../types/meTypes";
 import type {
   AdminCreateUserRequest,
   AdminUpdateUserRequest
@@ -58,12 +58,14 @@ export type IdentityClient = {
   refresh(): Promise<AuthRefreshResponse>;
   logout(req?: AuthLogoutRequest): Promise<void>;
   getMe(): Promise<MeResponse>;
+  updateMe(req: UpdateMeRequest): Promise<MeResponse>;
 
   listUsers(): Promise<AuthUserProfile[]>;
   getUser(id: string): Promise<AuthUserProfile>;
   createUser(req: AdminCreateUserRequest): Promise<AuthUserProfile>;
   updateUser(id: string, req: AdminUpdateUserRequest): Promise<AuthUserProfile>;
   deleteUser(id: string): Promise<void>;
+  revokeUserSessions(userId: string): Promise<void>;
 
   getSession(): IdentitySessionState | null;
   setSession(value: IdentitySessionState | null): void;
@@ -81,6 +83,7 @@ export type {
   AuthUserProfile,
   AuthProviderId,
   MeResponse,
+  UpdateMeRequest,
   AdminCreateUserRequest,
   AdminUpdateUserRequest
 };
