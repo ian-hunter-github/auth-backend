@@ -429,6 +429,24 @@ export function createIdentityClient(options: IdentityClientOptions = {}): Ident
     );
   }
 
+  async function disableUser(userId: string): Promise<void> {
+    await request<unknown>(
+      "POST",
+      `/admin-users/${encodeURIComponent(userId)}/disable`,
+      undefined,
+      { headers: { "x-request-id": "identity-client-admin-disable-user" } }
+    );
+  }
+
+  async function enableUser(userId: string): Promise<void> {
+    await request<unknown>(
+      "POST",
+      `/admin-users/${encodeURIComponent(userId)}/enable`,
+      undefined,
+      { headers: { "x-request-id": "identity-client-admin-enable-user" } }
+    );
+  }
+
   return {
     login,
     register,
@@ -442,6 +460,8 @@ export function createIdentityClient(options: IdentityClientOptions = {}): Ident
     updateUser,
     deleteUser,
     revokeUserSessions,
+    disableUser,
+    enableUser,
     getSession,
     setSession,
     clearSession

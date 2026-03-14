@@ -7,7 +7,7 @@ import type {
   AdminUsersResponse
 } from "../contracts/adminUsers.js";
 import { isAdminUser } from "../security/adminPolicy.js";
-import { createUser, deleteUser, getUserById, getUserFromToken, listUsers, revokeUserSessions, updateUser } from "./authService.js";
+import { createUser, deleteUser, disableUser, enableUser, getUserById, getUserFromToken, listUsers, revokeUserSessions, updateUser } from "./authService.js";
 
 async function requireAdmin(token: string): Promise<AuthUserProfile> {
   const caller = await getUserFromToken(token);
@@ -107,4 +107,14 @@ export async function deleteAdminUser(token: string, id: string): Promise<void> 
 export async function revokeAdminUserSessions(token: string, id: string): Promise<void> {
   await requireAdmin(token);
   await revokeUserSessions(id);
+}
+
+export async function disableAdminUser(token: string, id: string): Promise<void> {
+  await requireAdmin(token);
+  await disableUser(id);
+}
+
+export async function enableAdminUser(token: string, id: string): Promise<void> {
+  await requireAdmin(token);
+  await enableUser(id);
 }

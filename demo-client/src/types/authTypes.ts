@@ -17,6 +17,7 @@ export type AuthUserProfile = {
   phoneNumber?: string;
   locale: string;
   timezone: string;
+  disabled?: boolean;
 };
 
 export type AuthProviderId = "fake" | "postgres" | "google" | "github";

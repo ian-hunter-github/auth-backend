@@ -18,6 +18,7 @@ create table if not exists identity.users (
   locale text not null default 'en',
   timezone text not null default 'UTC',
   deleted_at timestamptz null,
+  disabled_at timestamptz null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -44,7 +45,11 @@ alter table identity.users add column if not exists phone_number text null;
 alter table identity.users add column if not exists locale text not null default 'en';
 alter table identity.users add column if not exists timezone text not null default 'UTC';
 
+-- Account disable/enable (backward compatible)
+alter table identity.users add column if not exists disabled_at timestamptz null;
+
 create index if not exists idx_identity_users_deleted_at on identity.users(deleted_at);
+create index if not exists idx_identity_users_disabled_at on identity.users(disabled_at);
 
 -- Refresh token sessions (hashed-at-rest)
 create table if not exists identity.sessions (

@@ -49,4 +49,6 @@ export type AuthProvider = {
   updateUser: (id: string, input: UpdateUserInput) => Promise<AuthUserProfile>;
   deleteUser: (id: string) => Promise<void>;
   revokeUserSessions: (userId: string) => Promise<void>;
+  disableUser: (id: string) => Promise<void>;
+  enableUser: (id: string) => Promise<void>;
 };

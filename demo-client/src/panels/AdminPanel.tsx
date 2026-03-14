@@ -76,6 +76,8 @@ export function AdminPanel() {
               }}
               onDelete={(u) => void vm.doDelete(u)}
               onRevokeSession={(u) => void vm.doRevokeSession(u)}
+              onDisable={(u) => void vm.doDisable(u)}
+              onEnable={(u) => void vm.doEnable(u)}
             />
           </Box>
         ) : (

@@ -31,6 +31,7 @@ export type AuthUserProfile = {
   phoneNumber?: string;
   locale: string;
   timezone: string;
+  disabled?: boolean;
 };
 
 export type AuthSession = {

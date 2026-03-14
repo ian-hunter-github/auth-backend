@@ -3,6 +3,7 @@ import type { AuthUserProfile } from "../../types/authTypes";
 import {
   Box,
   Button,
+  Chip,
   IconButton,
   Table,
   TableBody,
@@ -15,12 +16,15 @@ import {
 import EditIcon from "@mui/icons-material/Edit";
 import DeleteIcon from "@mui/icons-material/Delete";
 import BlockIcon from "@mui/icons-material/Block";
+import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
 
 export function AdminUsersTable(props: {
   users: AuthUserProfile[];
   onEdit: (u: AuthUserProfile) => void;
   onDelete: (u: AuthUserProfile) => void;
   onRevokeSession: (u: AuthUserProfile) => void;
+  onDisable: (u: AuthUserProfile) => void;
+  onEnable: (u: AuthUserProfile) => void;
 }) {
   return (
     <Box sx={{ overflow: "auto", border: "1px solid", borderColor: "divider", borderRadius: 1 }}>
@@ -31,17 +35,25 @@ export function AdminUsersTable(props: {
             <TableCell sx={{ whiteSpace: "nowrap" }}>Email</TableCell>
             <TableCell sx={{ whiteSpace: "nowrap" }}>Display name</TableCell>
             <TableCell sx={{ whiteSpace: "nowrap" }}>Roles</TableCell>
-            <TableCell sx={{ width: 120, textAlign: "right" }}>Actions</TableCell>
+            <TableCell sx={{ whiteSpace: "nowrap" }}>Status</TableCell>
+            <TableCell sx={{ width: 144, textAlign: "right" }}>Actions</TableCell>
           </TableRow>
         </TableHead>
         <TableBody>
           {props.users.length ? (
             props.users.map((u) => (
-              <TableRow key={u.id} hover>
+              <TableRow key={u.id} hover sx={u.disabled ? { opacity: 0.6 } : {}}>
                 <TableCell sx={{ fontFamily: "monospace", fontSize: 12 }}>{u.id}</TableCell>
                 <TableCell sx={{ whiteSpace: "nowrap" }}>{u.username}</TableCell>
                 <TableCell sx={{ whiteSpace: "nowrap" }}>{u.displayName}</TableCell>
                 <TableCell sx={{ whiteSpace: "nowrap" }}>{(u.roles || []).join(", ")}</TableCell>
+                <TableCell>
+                  {u.disabled ? (
+                    <Chip label="Disabled" size="small" color="warning" variant="outlined" />
+                  ) : (
+                    <Chip label="Active" size="small" color="success" variant="outlined" />
+                  )}
+                </TableCell>
                 <TableCell sx={{ textAlign: "right", whiteSpace: "nowrap" }}>
                   <Tooltip title="Edit">
                     <IconButton size="small" onClick={() => props.onEdit(u)}>
@@ -53,6 +65,19 @@ export function AdminUsersTable(props: {
                       <BlockIcon fontSize="small" />
                     </IconButton>
                   </Tooltip>
+                  {u.disabled ? (
+                    <Tooltip title="Enable account">
+                      <IconButton size="small" color="success" onClick={() => props.onEnable(u)}>
+                        <CheckCircleOutlineIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  ) : (
+                    <Tooltip title="Disable account">
+                      <IconButton size="small" color="warning" onClick={() => props.onDisable(u)}>
+                        <BlockIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  )}
                   <Tooltip title="Delete">
                     <IconButton size="small" onClick={() => props.onDelete(u)}>
                       <DeleteIcon fontSize="small" />
@@ -63,7 +88,7 @@ export function AdminUsersTable(props: {
             ))
           ) : (
             <TableRow>
-              <TableCell colSpan={5}>
+              <TableCell colSpan={6}>
                 <Typography variant="body2" color="text.secondary">
                   No users loaded.
                 </Typography>

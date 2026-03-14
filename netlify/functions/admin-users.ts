@@ -15,6 +15,8 @@ import type { AdminCreateUserRequest, AdminUpdateUserRequest } from "../../src/c
 import {
   createAdminUser,
   deleteAdminUser,
+  disableAdminUser,
+  enableAdminUser,
   getAdminUserById,
   getAdminUsers,
   revokeAdminUserSessions,
@@ -62,8 +64,15 @@ export const handler: Handler = async (event) => {
     }
 
     if (event.httpMethod === "POST") {
+      if (id && action === "disable") {
+        await disableAdminUser(token, id);
+        return jsonNoContent(204, requestId);
+      }
+      if (id && action === "enable") {
+        await enableAdminUser(token, id);
+        return jsonNoContent(204, requestId);
+      }
       if (id) {
-        // POST to /admin-users/:id is not supported
         return jsonMethodNotAllowed(requestId);
       }
       const req = parseJsonBody<AdminCreateUserRequest>(event.body);

@@ -74,3 +74,11 @@ export async function deleteUser(id: string): Promise<void> {
 export async function revokeUserSessions(userId: string): Promise<void> {
   return selectProvider().revokeUserSessions(userId);
 }
+
+export async function disableUser(id: string): Promise<void> {
+  return selectProvider().disableUser(id);
+}
+
+export async function enableUser(id: string): Promise<void> {
+  return selectProvider().enableUser(id);
+}

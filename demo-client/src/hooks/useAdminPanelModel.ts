@@ -93,6 +93,29 @@ export function useAdminPanelModel() {
     }
   }
 
+  async function doDisable(u: AuthUserProfile) {
+    const ok = window.confirm(`Disable user? They will be unable to log in.\n\n${u.username}\n${u.id}`);
+    if (!ok) return;
+
+    setPanelError(undefined);
+    try {
+      await client.disableUser(u.id);
+      await loadUsers();
+    } catch (err) {
+      setPanelError(toPanelError(err));
+    }
+  }
+
+  async function doEnable(u: AuthUserProfile) {
+    setPanelError(undefined);
+    try {
+      await client.enableUser(u.id);
+      await loadUsers();
+    } catch (err) {
+      setPanelError(toPanelError(err));
+    }
+  }
+
   return {
     auth,
     loginOpen,
@@ -111,6 +134,8 @@ export function useAdminPanelModel() {
     doCreate,
     doUpdate,
     doDelete,
-    doRevokeSession
+    doRevokeSession,
+    doDisable,
+    doEnable
   };
 }

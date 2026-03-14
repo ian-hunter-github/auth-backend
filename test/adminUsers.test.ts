@@ -268,6 +268,85 @@ describe("admin users (/.netlify/functions/admin-users)", () => {
     expect(refreshAfterBody.ok).toBe(false);
   });
 
+  it("admin can disable and enable a user", async () => {
+    const adminAccess = (await loginOk("demo", "letmein", "admin-disable-login-admin")).session.accessToken;
+
+    const email = uniqueEmail("disable-enable");
+
+    const createRes = await fetch(`${baseUrl}/.netlify/functions/admin-users`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${adminAccess}`,
+        "content-type": "application/json",
+        "x-request-id": "admin-disable-create-201"
+      },
+      body: JSON.stringify({ email, password: "letmein", displayName: "Disable Target" } satisfies AdminCreateUserRequest)
+    });
+    expect(createRes.status).toBe(201);
+    const createBody = (await createRes.json()) as SuccessEnvelope<AdminUserResponse>;
+    const userId = createBody.data.user.id;
+
+    // User can log in before being disabled
+    const loginBefore = await loginOk(email, "letmein", "admin-disable-user-login");
+    const refreshToken = loginBefore.session.refreshToken!;
+
+    // Non-admin cannot disable
+    const userAccess = (await loginOk("user@example.com", "letmein", "admin-disable-nonadmin-login")).session.accessToken;
+    const forbiddenRes = await fetch(`${baseUrl}/.netlify/functions/admin-users/${userId}/disable`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${userAccess}`, "x-request-id": "admin-disable-403" }
+    });
+    expect(forbiddenRes.status).toBe(403);
+
+    // Admin disables the user
+    const disableRes = await fetch(`${baseUrl}/.netlify/functions/admin-users/${userId}/disable`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${adminAccess}`, "x-request-id": "admin-disable-204" }
+    });
+    expect(disableRes.status).toBe(204);
+
+    // Disabled flag appears in user listing
+    const listRes = await fetch(`${baseUrl}/.netlify/functions/admin-users`, {
+      headers: { authorization: `Bearer ${adminAccess}`, "x-request-id": "admin-disable-list" }
+    });
+    expect(listRes.status).toBe(200);
+    const listBody = (await listRes.json()) as SuccessEnvelope<AdminUsersResponse>;
+    const disabledUser = listBody.data.users.find((u) => u.id === userId);
+    expect(disabledUser?.disabled).toBe(true);
+
+    // Disabled user cannot log in
+    const loginAfterRes = await login(email, "letmein", "admin-disable-login-after");
+    expect(loginAfterRes.status).toBe(403);
+
+    // Disabled user's existing refresh token is revoked
+    const refreshAfterRes = await fetch(`${baseUrl}/.netlify/functions/auth-refresh`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-request-id": "admin-disable-refresh-after" },
+      body: JSON.stringify({ refreshToken })
+    });
+    expect(refreshAfterRes.status).toBe(401);
+
+    // Admin enables the user
+    const enableRes = await fetch(`${baseUrl}/.netlify/functions/admin-users/${userId}/enable`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${adminAccess}`, "x-request-id": "admin-enable-204" }
+    });
+    expect(enableRes.status).toBe(204);
+
+    // User can log in again after being enabled
+    const loginAfterEnableRes = await login(email, "letmein", "admin-enable-login-after");
+    expect(loginAfterEnableRes.status).toBe(200);
+
+    // Enabled flag is cleared in user listing
+    const listAfterRes = await fetch(`${baseUrl}/.netlify/functions/admin-users`, {
+      headers: { authorization: `Bearer ${adminAccess}`, "x-request-id": "admin-enable-list" }
+    });
+    expect(listAfterRes.status).toBe(200);
+    const listAfterBody = (await listAfterRes.json()) as SuccessEnvelope<AdminUsersResponse>;
+    const enabledUser = listAfterBody.data.users.find((u) => u.id === userId);
+    expect(enabledUser?.disabled).toBeFalsy();
+  });
+
   it("admin can revoke all sessions for a user without deleting the account", async () => {
     const adminAccess = (await loginOk("demo", "letmein", "admin-revoke-login-admin")).session.accessToken;
 

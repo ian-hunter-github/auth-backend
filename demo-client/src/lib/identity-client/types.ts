@@ -66,6 +66,8 @@ export type IdentityClient = {
   updateUser(id: string, req: AdminUpdateUserRequest): Promise<AuthUserProfile>;
   deleteUser(id: string): Promise<void>;
   revokeUserSessions(userId: string): Promise<void>;
+  disableUser(userId: string): Promise<void>;
+  enableUser(userId: string): Promise<void>;
 
   getSession(): IdentitySessionState | null;
   setSession(value: IdentitySessionState | null): void;

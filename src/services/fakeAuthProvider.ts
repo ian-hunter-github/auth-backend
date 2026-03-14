@@ -17,6 +17,7 @@ type FakeUser = AuthUserProfile & {
   email: string;
   password: string;
   deletedAt?: string;
+  disabledAt?: string;
 };
 
 type FakeSession = {
@@ -188,6 +189,7 @@ async function findUserByEmail(email: string): Promise<FakeUser | undefined> {
 async function requireActiveUserByEmail(email: string): Promise<FakeUser> {
   const u = await findUserByEmail(email);
   if (!u || u.deletedAt) throw new AppError("Invalid credentials", { code: "UNAUTHORIZED", status: 401 });
+  if (u.disabledAt) throw new AppError("Account is disabled", { code: "FORBIDDEN", status: 403 });
   return u;
 }
 
@@ -202,6 +204,7 @@ async function requireUserById(id: string): Promise<FakeUser> {
 async function requireActiveUserById(id: string): Promise<FakeUser> {
   const u = await requireUserById(id);
   if (u.deletedAt) throw new AppError("Invalid token", { code: "UNAUTHORIZED", status: 401 });
+  if (u.disabledAt) throw new AppError("Account is disabled", { code: "FORBIDDEN", status: 403 });
   return u;
 }
 
@@ -217,7 +220,8 @@ function toProfile(user: FakeUser): AuthUserProfile {
     ...(user.bio ? { bio: user.bio } : {}),
     ...(user.phoneNumber ? { phoneNumber: user.phoneNumber } : {}),
     locale: user.locale ?? "en",
-    timezone: user.timezone ?? "UTC"
+    timezone: user.timezone ?? "UTC",
+    ...(user.disabledAt ? { disabled: true } : {})
   };
 }
 
@@ -500,6 +504,29 @@ export const fakeAuthProvider: AuthProvider = {
     const existing = store.usersById[id];
     if (!existing || existing.deletedAt) throw new AppError("Not found", { code: "NOT_FOUND", status: 404 });
     await revokeSessionsForUser(id);
+  },
+
+  disableUser: async (id: string): Promise<void> => {
+    await ensureSeedUsers();
+    const store = await loadUserStore();
+    const existing = store.usersById[id];
+    if (!existing || existing.deletedAt) throw new AppError("Not found", { code: "NOT_FOUND", status: 404 });
+    if (!existing.disabledAt) {
+      store.usersById[id] = { ...existing, disabledAt: nowIso() };
+      await saveUserStore(store);
+    }
+    await revokeSessionsForUser(id);
+  },
+
+  enableUser: async (id: string): Promise<void> => {
+    await ensureSeedUsers();
+    const store = await loadUserStore();
+    const existing = store.usersById[id];
+    if (!existing || existing.deletedAt) throw new AppError("Not found", { code: "NOT_FOUND", status: 404 });
+    const updated: FakeUser = { ...existing };
+    delete updated.disabledAt;
+    store.usersById[id] = updated;
+    await saveUserStore(store);
   }
 };
 
