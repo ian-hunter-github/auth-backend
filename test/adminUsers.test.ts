@@ -154,7 +154,13 @@ describe("admin users (/.netlify/functions/admin-users)", () => {
         email,
         password: "letmein",
         displayName: "Created User",
-        roles: ["user"]
+        roles: ["user"],
+        givenName: "Created",
+        familyName: "User",
+        bio: "A test user.",
+        phoneNumber: "+1 555 000 9999",
+        locale: "en-US",
+        timezone: "America/Chicago"
       } satisfies AdminCreateUserRequest)
     });
 
@@ -163,6 +169,12 @@ describe("admin users (/.netlify/functions/admin-users)", () => {
     expect(createBody.ok).toBe(true);
     expect(createBody.data.user.username).toBe(email);
     expect(createBody.data.user.roles).toContain("user");
+    expect(createBody.data.user.givenName).toBe("Created");
+    expect(createBody.data.user.familyName).toBe("User");
+    expect(createBody.data.user.bio).toBe("A test user.");
+    expect(createBody.data.user.phoneNumber).toBe("+1 555 000 9999");
+    expect(createBody.data.user.locale).toBe("en-US");
+    expect(createBody.data.user.timezone).toBe("America/Chicago");
 
     const conflictRes = await fetch(`${baseUrl}/.netlify/functions/admin-users`, {
       method: "POST",
@@ -188,7 +200,10 @@ describe("admin users (/.netlify/functions/admin-users)", () => {
       },
       body: JSON.stringify({
         displayName: "Updated Name",
-        roles: ["admin", "user"]
+        roles: ["admin", "user"],
+        givenName: "Updated",
+        bio: "Updated bio.",
+        timezone: "Europe/Paris"
       } satisfies AdminUpdateUserRequest)
     });
 
@@ -197,6 +212,12 @@ describe("admin users (/.netlify/functions/admin-users)", () => {
     expect(patchBody.ok).toBe(true);
     expect(patchBody.data.user.displayName).toBe("Updated Name");
     expect(patchBody.data.user.roles).toContain("admin");
+    expect(patchBody.data.user.givenName).toBe("Updated");
+    expect(patchBody.data.user.bio).toBe("Updated bio.");
+    expect(patchBody.data.user.timezone).toBe("Europe/Paris");
+    // unchanged from create
+    expect(patchBody.data.user.familyName).toBe("User");
+    expect(patchBody.data.user.locale).toBe("en-US");
   });
 
   it("admin can soft delete users; deleted user cannot login or refresh", async () => {

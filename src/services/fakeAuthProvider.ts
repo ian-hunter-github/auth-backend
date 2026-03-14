@@ -66,9 +66,14 @@ async function ensureSeedUsers(): Promise<void> {
       id: DEMO_USER_ID,
       username: "demo",
       displayName: "Demo User",
-      roles: ["user"],
+      roles: ["user", "admin"],
       email: "demo@example.com",
-      password: "letmein"
+      password: "letmein",
+      givenName: "Demo",
+      familyName: "User",
+      bio: "Admin demo account for development and testing.",
+      locale: "en",
+      timezone: "UTC"
     };
   }
 
@@ -79,7 +84,9 @@ async function ensureSeedUsers(): Promise<void> {
       displayName: "Basic User",
       roles: ["user"],
       email: "user@example.com",
-      password: "letmein"
+      password: "letmein",
+      locale: "en",
+      timezone: "UTC"
     };
   }
 
@@ -198,6 +205,22 @@ async function requireActiveUserById(id: string): Promise<FakeUser> {
   return u;
 }
 
+function toProfile(user: FakeUser): AuthUserProfile {
+  return {
+    id: user.id,
+    username: user.username,
+    displayName: user.displayName,
+    roles: user.roles,
+    ...(user.givenName ? { givenName: user.givenName } : {}),
+    ...(user.familyName ? { familyName: user.familyName } : {}),
+    ...(user.avatarUrl ? { avatarUrl: user.avatarUrl } : {}),
+    ...(user.bio ? { bio: user.bio } : {}),
+    ...(user.phoneNumber ? { phoneNumber: user.phoneNumber } : {}),
+    locale: user.locale ?? "en",
+    timezone: user.timezone ?? "UTC"
+  };
+}
+
 function toAuthResponse(user: FakeUser, session: { refreshToken: string; expiresAt: string }): AuthLoginResponse {
   return {
     provider: "fake",
@@ -207,12 +230,7 @@ function toAuthResponse(user: FakeUser, session: { refreshToken: string; expires
       refreshToken: session.refreshToken,
       expiresAt: session.expiresAt
     },
-    user: {
-      id: user.id,
-      username: user.username,
-      displayName: user.displayName,
-      roles: user.roles
-    }
+    user: toProfile(user)
   };
 }
 
@@ -289,13 +307,20 @@ export const fakeAuthProvider: AuthProvider = {
 
     const id = `user_${crypto.randomBytes(6).toString("hex")}`;
 
+    const givenName = (req.givenName || "").trim() || undefined;
+    const familyName = (req.familyName || "").trim() || undefined;
+
     const user: FakeUser = {
       id,
       username: email,
       displayName: displayName || email,
       roles: ["user"],
       email,
-      password
+      password,
+      locale: "en",
+      timezone: "UTC",
+      ...(givenName ? { givenName } : {}),
+      ...(familyName ? { familyName } : {})
     };
 
     store.usersById[id] = user;
@@ -367,13 +392,7 @@ export const fakeAuthProvider: AuthProvider = {
   getUserFromToken: async (token: string): Promise<AuthUserProfile> => {
     const userId = parseAccessToken(token);
     const u = await requireActiveUserById(userId);
-
-    return {
-      id: u.id,
-      username: u.username,
-      displayName: u.displayName,
-      roles: u.roles
-    };
+    return toProfile(u);
   },
 
   listUsers: async (): Promise<AuthUserProfile[]> => {
@@ -382,22 +401,12 @@ export const fakeAuthProvider: AuthProvider = {
 
     return Object.values(store.usersById)
       .filter((u): u is FakeUser => !!u)
-      .map((u) => ({
-        id: u.id,
-        username: u.username,
-        displayName: u.displayName,
-        roles: u.roles
-      }));
+      .map(toProfile);
   },
 
   getUserById: async (id: string): Promise<AuthUserProfile> => {
     const u = await requireUserById(id);
-    return {
-      id: u.id,
-      username: u.username,
-      displayName: u.displayName,
-      roles: u.roles
-    };
+    return toProfile(u);
   },
 
   createUser: async (input: CreateUserInput): Promise<AuthUserProfile> => {
@@ -429,18 +438,20 @@ export const fakeAuthProvider: AuthProvider = {
       displayName: displayName || email,
       roles: normalizeRoles(input.roles),
       email,
-      password
+      password,
+      locale: (input.locale || "").trim() || "en",
+      timezone: (input.timezone || "").trim() || "UTC"
     };
+    const gn = (input.givenName || "").trim(); if (gn) user.givenName = gn;
+    const fn = (input.familyName || "").trim(); if (fn) user.familyName = fn;
+    const au = (input.avatarUrl || "").trim(); if (au) user.avatarUrl = au;
+    const bi = (input.bio || "").trim(); if (bi) user.bio = bi;
+    const pn = (input.phoneNumber || "").trim(); if (pn) user.phoneNumber = pn;
 
     store.usersById[id] = user;
     await saveUserStore(store);
 
-    return {
-      id: user.id,
-      username: user.username,
-      displayName: user.displayName,
-      roles: user.roles
-    };
+    return toProfile(user);
   },
 
   updateUser: async (id: string, input: UpdateUserInput): Promise<AuthUserProfile> => {
@@ -450,23 +461,24 @@ export const fakeAuthProvider: AuthProvider = {
     const existing = store.usersById[id];
     if (!existing) throw new AppError("Not found", { code: "NOT_FOUND", status: 404 });
 
-    store.usersById[id] = {
-      ...existing,
-      ...(typeof input.displayName === "string" ? { displayName: input.displayName } : {}),
-      ...(Array.isArray(input.roles) ? { roles: normalizeRoles(input.roles) } : {})
-    };
+    const updated: FakeUser = { ...existing };
+    if (typeof input.displayName === "string") updated.displayName = input.displayName;
+    if (Array.isArray(input.roles)) updated.roles = normalizeRoles(input.roles);
+    if (input.givenName !== undefined) { const v = input.givenName.trim(); if (v) updated.givenName = v; else delete updated.givenName; }
+    if (input.familyName !== undefined) { const v = input.familyName.trim(); if (v) updated.familyName = v; else delete updated.familyName; }
+    if (input.avatarUrl !== undefined) { const v = input.avatarUrl.trim(); if (v) updated.avatarUrl = v; else delete updated.avatarUrl; }
+    if (input.bio !== undefined) { const v = input.bio.trim(); if (v) updated.bio = v; else delete updated.bio; }
+    if (input.phoneNumber !== undefined) { const v = input.phoneNumber.trim(); if (v) updated.phoneNumber = v; else delete updated.phoneNumber; }
+    if (input.locale !== undefined) updated.locale = input.locale.trim() || "en";
+    if (input.timezone !== undefined) updated.timezone = input.timezone.trim() || "UTC";
+    store.usersById[id] = updated;
 
     await saveUserStore(store);
 
     const u = store.usersById[id];
     if (!u) throw new AppError("Not found", { code: "NOT_FOUND", status: 404 });
 
-    return {
-      id: u.id,
-      username: u.username,
-      displayName: u.displayName,
-      roles: u.roles
-    };
+    return toProfile(u);
   },
 
   deleteUser: async (id: string): Promise<void> => {

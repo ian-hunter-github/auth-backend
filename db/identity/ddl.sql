@@ -10,6 +10,13 @@ create table if not exists identity.users (
   roles text[] not null default array['user'],
   password_salt text not null,
   password_hash text not null,
+  given_name text null,
+  family_name text null,
+  avatar_url text null,
+  bio text null,
+  phone_number text null,
+  locale text not null default 'en',
+  timezone text not null default 'UTC',
   deleted_at timestamptz null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -27,6 +34,15 @@ alter table identity.users
 
 alter table identity.users
   add column if not exists updated_at timestamptz not null default now();
+
+-- User profile extended fields (backward compatible)
+alter table identity.users add column if not exists given_name text null;
+alter table identity.users add column if not exists family_name text null;
+alter table identity.users add column if not exists avatar_url text null;
+alter table identity.users add column if not exists bio text null;
+alter table identity.users add column if not exists phone_number text null;
+alter table identity.users add column if not exists locale text not null default 'en';
+alter table identity.users add column if not exists timezone text not null default 'UTC';
 
 create index if not exists idx_identity_users_deleted_at on identity.users(deleted_at);
 

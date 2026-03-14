@@ -25,6 +25,13 @@ type DbUserRow = {
   deleted_at?: string | null;
   password_salt?: string | null;
   password_hash?: string | null;
+  given_name?: string | null;
+  family_name?: string | null;
+  avatar_url?: string | null;
+  bio?: string | null;
+  phone_number?: string | null;
+  locale?: string | null;
+  timezone?: string | null;
 };
 
 type DbSessionRow = {
@@ -67,7 +74,14 @@ function toProfile(row: DbUserRow): AuthUserProfile {
     id: row.id,
     username: row.email,
     displayName: row.display_name,
-    roles
+    roles,
+    ...(row.given_name ? { givenName: row.given_name } : {}),
+    ...(row.family_name ? { familyName: row.family_name } : {}),
+    ...(row.avatar_url ? { avatarUrl: row.avatar_url } : {}),
+    ...(row.bio ? { bio: row.bio } : {}),
+    ...(row.phone_number ? { phoneNumber: row.phone_number } : {}),
+    locale: row.locale ?? "en",
+    timezone: row.timezone ?? "UTC"
   };
 }
 
@@ -226,7 +240,7 @@ export const postgresAuthProvider: AuthProvider = {
     const email = username === "demo" ? "demo@example.com" : username;
     const p = getPool();
     const { rows } = await p.query<DbUserRow>(
-      "select id, email, display_name, roles, deleted_at, password_salt, password_hash from identity.users where email = $1 limit 1",
+      "select id, email, display_name, roles, deleted_at, password_salt, password_hash, given_name, family_name, avatar_url, bio, phone_number, locale, timezone from identity.users where email = $1 limit 1",
       [email]
     );
 
@@ -262,6 +276,8 @@ export const postgresAuthProvider: AuthProvider = {
     const email = (req.email || "").trim().toLowerCase();
     const password = req.password || "";
     const displayName = (req.displayName || "").trim();
+    const givenName = (req.givenName || "").trim() || null;
+    const familyName = (req.familyName || "").trim() || null;
 
     if (!email || !password) {
       throw new AppError("email and password are required", {
@@ -286,11 +302,11 @@ export const postgresAuthProvider: AuthProvider = {
 
     const { rows } = await p.query<DbUserRow>(
       `
-      insert into identity.users (email, display_name, roles, password_salt, password_hash)
-      values ($1, $2, $3, $4, $5)
-      returning id, email, display_name, roles, deleted_at, password_salt, password_hash
+      insert into identity.users (email, display_name, roles, password_salt, password_hash, given_name, family_name)
+      values ($1, $2, $3, $4, $5, $6, $7)
+      returning id, email, display_name, roles, deleted_at, password_salt, password_hash, given_name, family_name, avatar_url, bio, phone_number, locale, timezone
       `,
-      [email, displayName || email, roles, salt, hash]
+      [email, displayName || email, roles, salt, hash, givenName, familyName]
     );
 
     const u = rows[0];
@@ -348,7 +364,7 @@ export const postgresAuthProvider: AuthProvider = {
     }
 
     const { rows: users } = await p.query<DbUserRow>(
-      "select id, email, display_name, roles, deleted_at, password_salt, password_hash from identity.users where id = $1::uuid limit 1",
+      "select id, email, display_name, roles, deleted_at, password_salt, password_hash, given_name, family_name, avatar_url, bio, phone_number, locale, timezone from identity.users where id = $1::uuid limit 1",
       [s.user_id]
     );
 
@@ -396,7 +412,7 @@ export const postgresAuthProvider: AuthProvider = {
 
     const p = getPool();
     const { rows } = await p.query<DbUserRow>(
-      "select id, email, display_name, roles, deleted_at, password_salt, password_hash from identity.users where id = $1::uuid limit 1",
+      "select id, email, display_name, roles, deleted_at, given_name, family_name, avatar_url, bio, phone_number, locale, timezone from identity.users where id = $1::uuid limit 1",
       [userId]
     );
 
@@ -412,7 +428,7 @@ export const postgresAuthProvider: AuthProvider = {
   listUsers: async (): Promise<AuthUserProfile[]> => {
     const p = getPool();
     const { rows } = await p.query<DbUserRow>(
-      "select id, email, display_name, roles, deleted_at from identity.users where deleted_at is null order by created_at desc"
+      "select id, email, display_name, roles, deleted_at, given_name, family_name, avatar_url, bio, phone_number, locale, timezone from identity.users where deleted_at is null order by created_at desc"
     );
     return rows.map(toProfile);
   },
@@ -422,7 +438,7 @@ export const postgresAuthProvider: AuthProvider = {
 
     const p = getPool();
     const { rows } = await p.query<DbUserRow>(
-      "select id, email, display_name, roles, deleted_at from identity.users where id = $1::uuid limit 1",
+      "select id, email, display_name, roles, deleted_at, given_name, family_name, avatar_url, bio, phone_number, locale, timezone from identity.users where id = $1::uuid limit 1",
       [id]
     );
     const row = rows[0];
@@ -435,6 +451,13 @@ export const postgresAuthProvider: AuthProvider = {
     const password = input.password || "";
     const displayName = (input.displayName || "").trim();
     const roles = normalizeRoles(input.roles);
+    const givenName = (input.givenName || "").trim() || null;
+    const familyName = (input.familyName || "").trim() || null;
+    const avatarUrl = (input.avatarUrl || "").trim() || null;
+    const bio = (input.bio || "").trim() || null;
+    const phoneNumber = (input.phoneNumber || "").trim() || null;
+    const locale = (input.locale || "").trim() || "en";
+    const timezone = (input.timezone || "").trim() || "UTC";
 
     if (!email || !password) {
       throw new AppError("email and password are required", {
@@ -458,11 +481,11 @@ export const postgresAuthProvider: AuthProvider = {
 
     const { rows } = await p.query<DbUserRow>(
       `
-      insert into identity.users (email, display_name, roles, password_salt, password_hash)
-      values ($1, $2, $3, $4, $5)
-      returning id, email, display_name, roles, deleted_at
+      insert into identity.users (email, display_name, roles, password_salt, password_hash, given_name, family_name, avatar_url, bio, phone_number, locale, timezone)
+      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      returning id, email, display_name, roles, deleted_at, given_name, family_name, avatar_url, bio, phone_number, locale, timezone
       `,
-      [email, displayName || email, roles, salt, hash]
+      [email, displayName || email, roles, salt, hash, givenName, familyName, avatarUrl, bio, phoneNumber, locale, timezone]
     );
 
     const u = rows[0];
@@ -479,7 +502,7 @@ export const postgresAuthProvider: AuthProvider = {
     const p = getPool();
 
     const { rows: existing } = await p.query<DbUserRow>(
-      "select id, email, display_name, roles, deleted_at from identity.users where id = $1::uuid limit 1",
+      "select id, email, display_name, roles, deleted_at, given_name, family_name, avatar_url, bio, phone_number, locale, timezone from identity.users where id = $1::uuid limit 1",
       [id]
     );
     const current = existing[0];
@@ -487,16 +510,31 @@ export const postgresAuthProvider: AuthProvider = {
 
     const nextDisplayName = displayName === undefined ? current.display_name : displayName || current.email;
     const nextRoles = roles === undefined ? (Array.isArray(current.roles) ? current.roles : ["user"]) : roles;
+    const nextGivenName = input.givenName === undefined ? (current.given_name ?? null) : (input.givenName || "").trim() || null;
+    const nextFamilyName = input.familyName === undefined ? (current.family_name ?? null) : (input.familyName || "").trim() || null;
+    const nextAvatarUrl = input.avatarUrl === undefined ? (current.avatar_url ?? null) : (input.avatarUrl || "").trim() || null;
+    const nextBio = input.bio === undefined ? (current.bio ?? null) : (input.bio || "").trim() || null;
+    const nextPhoneNumber = input.phoneNumber === undefined ? (current.phone_number ?? null) : (input.phoneNumber || "").trim() || null;
+    const nextLocale = input.locale === undefined ? (current.locale ?? "en") : (input.locale || "").trim() || "en";
+    const nextTimezone = input.timezone === undefined ? (current.timezone ?? "UTC") : (input.timezone || "").trim() || "UTC";
 
     const { rows } = await p.query<DbUserRow>(
       `
       update identity.users
       set display_name = $2,
-          roles = $3
+          roles = $3,
+          given_name = $4,
+          family_name = $5,
+          avatar_url = $6,
+          bio = $7,
+          phone_number = $8,
+          locale = $9,
+          timezone = $10,
+          updated_at = now()
       where id = $1::uuid
-      returning id, email, display_name, roles, deleted_at
+      returning id, email, display_name, roles, deleted_at, given_name, family_name, avatar_url, bio, phone_number, locale, timezone
       `,
-      [id, nextDisplayName, nextRoles]
+      [id, nextDisplayName, nextRoles, nextGivenName, nextFamilyName, nextAvatarUrl, nextBio, nextPhoneNumber, nextLocale, nextTimezone]
     );
 
     const updated = rows[0];

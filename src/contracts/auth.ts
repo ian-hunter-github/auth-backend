@@ -7,6 +7,8 @@ export type AuthRegisterRequest = {
   email: string;
   password: string;
   displayName?: string;
+  givenName?: string;
+  familyName?: string;
 };
 
 export type AuthRefreshRequest = {
@@ -22,6 +24,13 @@ export type AuthUserProfile = {
   username: string;
   displayName: string;
   roles: string[];
+  givenName?: string;
+  familyName?: string;
+  avatarUrl?: string;
+  bio?: string;
+  phoneNumber?: string;
+  locale: string;
+  timezone: string;
 };
 
 export type AuthSession = {

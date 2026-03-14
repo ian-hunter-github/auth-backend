@@ -15,11 +15,25 @@ export type CreateUserInput = {
   password: string;
   displayName?: string;
   roles?: string[];
+  givenName?: string;
+  familyName?: string;
+  avatarUrl?: string;
+  bio?: string;
+  phoneNumber?: string;
+  locale?: string;
+  timezone?: string;
 };
 
 export type UpdateUserInput = {
   displayName?: string;
   roles?: string[];
+  givenName?: string;
+  familyName?: string;
+  avatarUrl?: string;
+  bio?: string;
+  phoneNumber?: string;
+  locale?: string;
+  timezone?: string;
 };
 
 export type AuthProvider = {

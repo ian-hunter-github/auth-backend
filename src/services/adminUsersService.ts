@@ -49,7 +49,14 @@ export async function createAdminUser(token: string, req: AdminCreateUserRequest
     email,
     password,
     ...(displayName ? { displayName } : {}),
-    ...(roles ? { roles } : {})
+    ...(roles ? { roles } : {}),
+    ...(req.givenName !== undefined ? { givenName: req.givenName } : {}),
+    ...(req.familyName !== undefined ? { familyName: req.familyName } : {}),
+    ...(req.avatarUrl !== undefined ? { avatarUrl: req.avatarUrl } : {}),
+    ...(req.bio !== undefined ? { bio: req.bio } : {}),
+    ...(req.phoneNumber !== undefined ? { phoneNumber: req.phoneNumber } : {}),
+    ...(req.locale !== undefined ? { locale: req.locale } : {}),
+    ...(req.timezone !== undefined ? { timezone: req.timezone } : {})
   });
 
   return { user };
@@ -65,18 +72,30 @@ export async function updateAdminUser(
   const displayName = req.displayName === undefined ? undefined : (req.displayName || "").trim();
   const roles = req.roles === undefined ? undefined : req.roles;
 
+  const profileFields = ["givenName", "familyName", "avatarUrl", "bio", "phoneNumber", "locale", "timezone"] as const;
+  const hasProfileField = profileFields.some((f) => req[f] !== undefined);
   const hasDisplayName = displayName !== undefined;
   const hasRoles = roles !== undefined;
 
-  if (!hasDisplayName && !hasRoles) {
+  if (!hasDisplayName && !hasRoles && !hasProfileField) {
     throw new AppError("At least one field must be provided", {
       code: "BAD_REQUEST",
       status: 400,
-      details: { fields: ["displayName", "roles"] }
+      details: { fields: ["displayName", "roles", ...profileFields] }
     });
   }
 
-  const user = await updateUser(id, { ...(hasDisplayName ? { displayName } : {}), ...(hasRoles ? { roles } : {}) });
+  const user = await updateUser(id, {
+    ...(hasDisplayName ? { displayName } : {}),
+    ...(hasRoles ? { roles } : {}),
+    ...(req.givenName !== undefined ? { givenName: req.givenName } : {}),
+    ...(req.familyName !== undefined ? { familyName: req.familyName } : {}),
+    ...(req.avatarUrl !== undefined ? { avatarUrl: req.avatarUrl } : {}),
+    ...(req.bio !== undefined ? { bio: req.bio } : {}),
+    ...(req.phoneNumber !== undefined ? { phoneNumber: req.phoneNumber } : {}),
+    ...(req.locale !== undefined ? { locale: req.locale } : {}),
+    ...(req.timezone !== undefined ? { timezone: req.timezone } : {})
+  });
   return { user };
 }
 
