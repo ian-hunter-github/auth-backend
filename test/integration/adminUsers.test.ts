@@ -1,13 +1,13 @@
-import { testBaseUrl } from "./helpers/testBaseUrl.js";
+import { testBaseUrl } from "../helpers/testBaseUrl.js";
 import { describe, it, expect, beforeAll } from "vitest";
-import type { SuccessEnvelope, ErrorEnvelope } from "../src/lib/response.js";
-import type { AuthLoginResponse } from "../src/contracts/auth.js";
+import type { SuccessEnvelope, ErrorEnvelope } from "../../src/lib/response.js";
+import type { AuthLoginResponse } from "../../src/contracts/auth.js";
 import type {
   AdminCreateUserRequest,
   AdminUpdateUserRequest,
   AdminUserResponse,
   AdminUsersResponse,
-} from "../src/contracts/adminUsers.js";
+} from "../../src/contracts/adminUsers.js";
 
 let baseUrl = "";
 

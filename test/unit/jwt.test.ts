@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { signAccessToken, verifyAccessToken } from "../src/lib/jwt.js";
+import { signAccessToken, verifyAccessToken } from "../../src/lib/jwt.js";
 
 describe("jwt", () => {
   beforeEach(() => {

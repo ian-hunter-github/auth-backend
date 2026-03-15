@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
-import { closeAuditPool, writeAuditLog } from "../src/services/auditLogService.js";
-import { ensurePgEnvLoaded } from "./loadPgEnv.js";
+import { closeAuditPool, writeAuditLog } from "../../src/services/auditLogService.js";
+import { ensurePgEnvLoaded } from "../loadPgEnv.js";
 
 const RUN_PG_TESTS = (process.env.RUN_PG_TESTS || "").trim() === "1";
 
@@ -38,7 +38,7 @@ describe("audit log (RUN_PG_TESTS=1)", () => {
       requestId: "test-audit-req-001",
       ip: "127.0.0.1",
       userAgent: "vitest",
-      details: { hello: "world" }
+      details: { hello: "world" },
     });
 
     expect(typeof auditId).toBe("string");
@@ -53,7 +53,7 @@ describe("audit log (RUN_PG_TESTS=1)", () => {
           where id = $1::uuid
           limit 1
         `,
-        [auditId]
+        [auditId],
       );
 
       expect(rows.length).toBe(1);
@@ -64,4 +64,3 @@ describe("audit log (RUN_PG_TESTS=1)", () => {
     }
   });
 });
-

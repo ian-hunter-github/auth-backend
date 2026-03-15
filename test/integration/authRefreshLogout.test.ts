@@ -1,7 +1,7 @@
-import { testBaseUrl } from "./helpers/testBaseUrl.js";
+import { testBaseUrl } from "../helpers/testBaseUrl.js";
 import { beforeAll, describe, expect, it } from "vitest";
-import type { SuccessEnvelope, ErrorEnvelope } from "../src/lib/response.js";
-import type { AuthLoginResponse, AuthRefreshResponse } from "../src/contracts/auth.js";
+import type { SuccessEnvelope, ErrorEnvelope } from "../../src/lib/response.js";
+import type { AuthLoginResponse, AuthRefreshResponse } from "../../src/contracts/auth.js";
 
 let baseUrl = "";
 

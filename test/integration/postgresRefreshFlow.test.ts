@@ -1,9 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
-import { startNetlifyDev } from "./netlifyDevHarness.js";
-import type { SuccessEnvelope, ErrorEnvelope } from "../src/lib/response.js";
-import type { AuthLoginResponse, AuthRefreshResponse } from "../src/contracts/auth.js";
-import { ensurePgEnvLoaded } from "./loadPgEnv.js";
+import { startNetlifyDev } from "../netlifyDevHarness.js";
+import type { SuccessEnvelope, ErrorEnvelope } from "../../src/lib/response.js";
+import type { AuthLoginResponse, AuthRefreshResponse } from "../../src/contracts/auth.js";
+import { ensurePgEnvLoaded } from "../loadPgEnv.js";
 
 const SHOULD_RUN = process.env.RUN_PG_TESTS === "1";
 
@@ -43,7 +43,7 @@ function getDb(): pg.Pool {
     user,
     password,
     ...(port ? { port: Number(port) } : {}),
-    ...(ssl ? { ssl } : {})
+    ...(ssl ? { ssl } : {}),
   });
 
   return db;
@@ -53,7 +53,7 @@ async function countAudit(action: string, requestId: string): Promise<number> {
   const p = getDb();
   const { rows } = await p.query<{ n: string }>(
     "select count(*)::text as n from identity.audit_log where action = $1::text and request_id = $2::text",
-    [action, requestId]
+    [action, requestId],
   );
   const n = Number(rows[0]?.n || "0");
   return Number.isFinite(n) ? n : 0;
@@ -179,4 +179,3 @@ suite("postgres refresh flow (RUN_PG_TESTS=1)", () => {
     expect(meTampered.status).toBe(401);
   });
 });
-
