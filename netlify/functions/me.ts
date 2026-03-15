@@ -1,11 +1,16 @@
 import type { Handler } from "@netlify/functions";
 import { getOrCreateRequestId } from "../../src/platform/http/requestId.js";
 import { parseJsonBody } from "../../src/platform/http/body.js";
-import { jsonCorsPreflight, jsonOk, requireMethod, toErrorResponse } from "../../src/platform/http/response.js";
+import {
+  jsonCorsPreflight,
+  jsonOk,
+  requireMethod,
+  toErrorResponse,
+} from "../../src/platform/http/response.js";
 import { getBearerToken } from "../../src/lib/authHeader.js";
 
 import type { UpdateMeRequest } from "../../src/contracts/me.js";
-import { getMe, updateMe } from "../../src/services/meService.js";
+import { getMe, updateMe } from "../../src/domains/profile/index.js";
 
 export const handler: Handler = async (event) => {
   const requestId = getOrCreateRequestId(event.headers || {});
@@ -28,7 +33,6 @@ export const handler: Handler = async (event) => {
     const req = parseJsonBody<UpdateMeRequest>(event.body);
     const data = await updateMe(token, req);
     return jsonOk(200, requestId, data);
-
   } catch (err) {
     return toErrorResponse(requestId, err);
   }
