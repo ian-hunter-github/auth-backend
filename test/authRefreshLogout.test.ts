@@ -14,7 +14,11 @@ beforeAll(() => {
 async function loginDemo(): Promise<AuthLoginResponse> {
   const res = await fetch(`${baseUrl}/.netlify/functions/auth-login`, {
     method: "POST",
-    headers: { "content-type": "application/json", "x-request-id": "test-refresh-login" },
+    headers: {
+      "content-type": "application/json",
+      "x-request-id": "test-refresh-login",
+      "x-forwarded-for": "127.0.20.1"
+    },
     body: JSON.stringify({ username: "demo", password: "letmein" })
   });
 
@@ -58,7 +62,6 @@ describe("POST /.netlify/functions/auth-refresh + auth-logout", () => {
     expect(typeof rt2).toBe("string");
     expect(rt2).not.toBe(rt1);
 
-    // old refresh token should now be invalid
     const refreshOld = await fetch(`${baseUrl}/.netlify/functions/auth-refresh`, {
       method: "POST",
       headers: { "content-type": "application/json", "x-request-id": "test-refresh-old-401" },
@@ -79,7 +82,6 @@ describe("POST /.netlify/functions/auth-refresh + auth-logout", () => {
 
     expect(logoutRes.status).toBe(204);
 
-    // refreshed token should now be invalid
     const refreshAfterLogout = await fetch(`${baseUrl}/.netlify/functions/auth-refresh`, {
       method: "POST",
       headers: { "content-type": "application/json", "x-request-id": "test-refresh-after-logout-401" },
@@ -89,4 +91,3 @@ describe("POST /.netlify/functions/auth-refresh + auth-logout", () => {
     expect(refreshAfterLogout.status).toBe(401);
   });
 });
-
