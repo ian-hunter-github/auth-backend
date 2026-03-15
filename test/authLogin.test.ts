@@ -17,7 +17,8 @@ describe("POST /.netlify/functions/auth-login", () => {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "x-request-id": "test-auth-401"
+        "x-request-id": "test-auth-401",
+        "x-forwarded-for": "127.0.10.1"
       },
       body: JSON.stringify({ username: "demo", password: "bad" })
     });
@@ -33,7 +34,8 @@ describe("POST /.netlify/functions/auth-login", () => {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "x-request-id": "test-auth-200"
+        "x-request-id": "test-auth-200",
+        "x-forwarded-for": "127.0.10.2"
       },
       body: JSON.stringify({ username: "demo", password: "letmein" })
     });
