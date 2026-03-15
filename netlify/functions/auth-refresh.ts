@@ -1,11 +1,11 @@
 import type { Handler } from "@netlify/functions";
-import { getOrCreateRequestId } from "../../src/lib/requestId.js";
-import { parseJsonBody } from "../../src/lib/body.js";
-import { jsonCorsPreflight, jsonOk, jsonTooManyRequests, requireMethod, toErrorResponse } from "../../src/lib/response.js";
+import { getOrCreateRequestId } from "../../src/platform/http/requestId.js";
+import { parseJsonBody } from "../../src/platform/http/body.js";
+import { jsonCorsPreflight, jsonOk, jsonTooManyRequests, requireMethod, toErrorResponse } from "../../src/platform/http/response.js";
 import type { AuthRefreshRequest } from "../../src/contracts/auth.js";
 import { refresh } from "../../src/services/authService.js";
-import { buildRequestContext } from "../../src/security/requestContext.js";
-import { checkRateLimit, rateKeyFromContext } from "../../src/security/rateLimiter.js";
+import { buildRequestContext } from "../../src/platform/security/requestContext.js";
+import { checkRateLimit, rateKeyFromContext } from "../../src/platform/security/rateLimiter.js";
 import { writeAuditLog } from "../../src/services/auditLogService.js";
 
 const REFRESH_IP_POLICY = {

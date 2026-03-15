@@ -1,7 +1,7 @@
 import type { Handler } from "@netlify/functions";
-import { getOrCreateRequestId } from "../../src/lib/requestId.js";
+import { getOrCreateRequestId } from "../../src/platform/http/requestId.js";
+import { jsonCorsPreflight, jsonOk, requireMethod, toErrorResponse } from "../../src/platform/http/response.js";
 import { getBearerToken } from "../../src/lib/authHeader.js";
-import { jsonCorsPreflight, jsonOk, requireMethod, toErrorResponse } from "../../src/lib/response.js";
 import { getHealthAdmin } from "../../src/services/healthAdminService.js";
 
 export const handler: Handler = async (event) => {

@@ -1,6 +1,6 @@
 import type { Handler } from "@netlify/functions";
-import { getOrCreateRequestId } from "../../src/lib/requestId.js";
-import { parseJsonBody } from "../../src/lib/body.js";
+import { getOrCreateRequestId } from "../../src/platform/http/requestId.js";
+import { parseJsonBody } from "../../src/platform/http/body.js";
 import { getBearerToken } from "../../src/lib/authHeader.js";
 import {
   jsonBadRequest,
@@ -10,7 +10,7 @@ import {
   jsonOk,
   requireMethod,
   toErrorResponse
-} from "../../src/lib/response.js";
+} from "../../src/platform/http/response.js";
 import type { AdminCreateUserRequest, AdminUpdateUserRequest } from "../../src/contracts/adminUsers.js";
 import {
   createAdminUser,
