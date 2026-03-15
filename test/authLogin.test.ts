@@ -1,3 +1,4 @@
+import { testBaseUrl } from "./helpers/testBaseUrl.js";
 import { beforeAll, describe, expect, it } from "vitest";
 import type { SuccessEnvelope, ErrorEnvelope } from "../src/lib/response.js";
 import type { AuthLoginResponse } from "../src/contracts/auth.js";
@@ -5,7 +6,7 @@ import type { AuthLoginResponse } from "../src/contracts/auth.js";
 let baseUrl = "";
 
 beforeAll(() => {
-  baseUrl = process.env.TEST_BASE_URL || "";
+  baseUrl = testBaseUrl();
   if (!baseUrl) {
     throw new Error("Missing TEST_BASE_URL (global setup did not run?)");
   }
