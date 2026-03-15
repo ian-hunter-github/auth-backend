@@ -5,103 +5,79 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-npm run dev          # Start Netlify Dev server (port 3999)
+npm run dev          # Start Netlify Dev on port 3999
 npm run build        # Build Netlify functions
-npm run typecheck    # TypeScript type-check
 npm run lint         # ESLint
+npm run typecheck    # TypeScript compiler
 npm run format       # Prettier
-npm run test         # Run tests in watch mode (Vitest)
-npm run test:run     # Run tests once (CI mode)
-npm run ci           # lint + typecheck + test (full CI pipeline)
+npm run test:run     # Vitest (single run, all tests)
+npm run ci           # lint + typecheck + test
 ```
 
 **Run a single test file:**
 ```bash
-npx vitest run test/auth-login.test.ts
-```
-
-**Database schema (dev/Neon):**
-```bash
-PGSYSTEM=neon scripts/identity_schema_dev.sh
-```
-
-**Smoke test against running server:**
-```bash
-./scripts/smoke-api.sh --debug
+npm run test:run -- test/integration/authLogin.test.ts
 ```
 
 ## Architecture
 
-This is a **serverless auth backend** deployed on Netlify Functions. There is no traditional Express server — each endpoint is a standalone function in `netlify/functions/`.
+This is a serverless authentication backend built on **Netlify Functions** + **TypeScript**. There is no Express — each endpoint is a Netlify Function.
 
 ### Request Flow
 
-Each function handler:
-1. Extracts/generates a `requestId` (UUID, passed via header or created)
-2. Validates HTTP method
-3. Parses JSON body
-4. Applies rate limiting + brute-force lockout (login only)
-5. Delegates to the service layer
-6. Wraps response in standardized envelope: `{ ok, requestId, data?, error? }`
-
-### Auth Provider Pattern
-
-All auth logic routes through `src/services/authService.ts` which selects a provider based on `AUTH_PROVIDER` env var:
-- **`fake`** — in-memory JSON files in `/tmp/`; used for all tests and CI; deterministic tokens (`fake-access-token.{userId}`)
-- **`postgres`** — Neon PostgreSQL; used in production
-
-The provider interface is defined by `IAuthProvider`. Adding a new provider means implementing that interface and registering it in `authService.ts`.
-
-### Token Strategy
-
-- **Access tokens**: HS256 JWTs. Payload: `{ sub, iat, exp, jti }`. TTL default 900s (`AUTH_JWT_TTL_SECONDS`). Custom sign/verify in `src/lib/jwt.ts` (no `jsonwebtoken` library — manual HMAC with timing-safe comparison).
-- **Refresh tokens**: `<provider>-refresh-token.<random-hex>`. Stored SHA256-hashed in `identity.sessions`. 60-minute TTL. Token rotation on refresh (old revoked, new issued). Session family lineage tracked.
-- **Passwords**: `sha256(salt || plaintext)`. Salt is 16 random bytes (hex).
-
-### Database
-
-Direct `pg` (no ORM). Schema lives in `db/identity/ddl.sql`:
-- `identity.users` — accounts, profile fields, salted password hash
-- `identity.sessions` — refresh tokens (hashed), revocation, IP/UA metadata
-- `identity.audit_log` — append-only action log (actor, target, request context, JSONB details)
-- `identity.rate_limits` — bucketed counters per route/key
-- `identity.auth_failures` — window-based brute-force tracking
-
-DDL uses `IF NOT EXISTS` / `ADD COLUMN IF NOT EXISTS` for safe re-runs. Env vars: `PGHOST`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`, `PGPORT`, `PGSSLMODE`.
-
-### Security Modules (`src/security/`)
-
-- `runtimeConfig.ts` — validates all required env vars on startup; missing vars = immediate 500
-- `rateLimiter.ts` — per-route, per-key bucketed limits; falls back to in-memory Map if Postgres unavailable
-- `loginLockout.ts` — brute-force lockout by identifier+IP; same in-memory fallback
-- `adminPolicy.ts` — `ADMIN_USER_EMAILS` env var (comma/space-separated) gates admin role assignment
-- `adminAuth.ts` — `requireAdminUser()` checks `roles` array for `"admin"`
+```
+netlify/functions/<name>.ts
+  → adapters/netlify/  (Netlify event → AppHttpRequest)
+  → app/handlers/      (business logic)
+  → domains/           (domain services)
+  → services/          (auth provider selection, DB access)
+  → adapters/netlify/  (AppHttpResponse → Netlify response)
+```
 
 ### Key Directories
 
+- **`netlify/functions/`** — one file per endpoint; thin wrappers that adapt and delegate
+- **`src/adapters/netlify/`** — translates between Netlify event/response and internal types
+- **`src/app/handlers/`** — HTTP handlers (auth, me, health, admin)
+- **`src/domains/`** — domain logic organized by capability: `auth/`, `profile/`, `admin/`, `users/`, `system/`
+- **`src/services/`** — provider selection and DB access; `authService.ts` picks `fakeAuthProvider` vs `postgresAuthProvider` based on `AUTH_PROVIDER` env var
+- **`src/platform/`** — shared infrastructure: JWT, rate limiting, login lockout, error types, config, HTTP utilities
+- **`src/contracts/`** — request/response type definitions
+- **`db/identity/`** — SQL schema (`ddl.sql`), reset, and seed scripts
+
+### Response Envelope
+
+All responses follow this shape:
+```json
+{ "ok": boolean, "requestId": string, "data"?: object, "error"?: { "code", "message" } }
 ```
-src/lib/          # Utilities: errors, JWT, response envelope, env, body parsing
-src/contracts/    # DTOs and response types for every endpoint
-src/services/     # Business logic; postgres/ subdirectory for DB-layer queries
-src/security/     # Rate limiting, lockout, admin auth, runtime config validation
-netlify/functions/# One file per HTTP endpoint
-db/identity/      # DDL, reset, and seed scripts
-test/             # Vitest integration tests (hit the real Netlify Dev server)
-scripts/          # Bash utilities: smoke tests, health checks, DB setup
-```
+
+### Auth Provider Pattern
+
+Auth operations are abstracted behind `authProvider.ts`. The provider is selected at runtime:
+- **`fake`** — deterministic, no DB required; demo credentials: `demo` / `letmein`
+- **`postgres`** — production Neon/Postgres backend
+
+Set via `AUTH_PROVIDER=fake|postgres` in `.env.local`.
 
 ### Testing
 
-Tests are **integration tests** that hit a real Netlify Dev server (started once in `test/globalSetup.ts`). `AUTH_PROVIDER=fake` is forced globally. Tests run serially (single-threaded) to avoid port conflicts. Timeouts: 120s setup/teardown, 120s per test.
+Tests are integration tests that hit a real Netlify Dev instance. Vitest's `globalSetup` starts a single Netlify Dev process shared across all test files. Tests run serially (parallelism disabled) with 120s timeouts.
 
-There are no unit tests — the test suite exercises the full HTTP stack.
+CI uses `AUTH_PROVIDER=fake` — no database needed.
 
-## Environment Setup
+### Security
 
-Copy `.env.example` to `.env.local` and set at minimum:
+- **JWT**: HS256 access tokens + refresh tokens stored in DB
+- **Rate limiting**: IP-based and IP+identifier sliding window
+- **Login lockout**: 8 failures in 15 min → 15 min lockout
+- **Security headers**: CSP, HSTS, X-Frame-Options set on all responses
+
+### Environment Variables
+
 ```
-AUTH_PROVIDER=fake        # or 'postgres' for local DB dev
-AUTH_JWT_SECRET=<secret>  # required; hex or UTF-8
+AUTH_PROVIDER=fake|postgres
+AUTH_JWT_SECRET=<32+ bytes>
+# If postgres:
+PGHOST, PGDATABASE, PGUSER, PGPASSWORD, PGPORT, PGSSLMODE
 ```
-
-For Postgres: populate from `postgres/env/neon/.env` (Neon connection credentials).
