@@ -1,16 +1,18 @@
 import pg from "pg";
-import { AppError } from "../lib/errors.js";
-import { getEnv, requireEnv } from "../lib/env.js";
-import { isAdminUser } from "../security/adminPolicy.js";
-import { getUserFromToken } from "./authService.js";
-import type { HealthAdminResponse } from "../contracts/healthAdmin.js";
+import { AppError } from "../../../lib/errors.js";
+import { getEnv, requireEnv } from "../../../lib/env.js";
+import { isAdminUser } from "../../../security/adminPolicy.js";
+import { getUserFromToken } from "../../../services/authService.js";
+import type { HealthAdminResponse } from "../../../contracts/healthAdmin.js";
 
 const { Pool } = pg;
 
 let pool: pg.Pool | undefined;
 
 function hasPgEnv(): boolean {
-  return !!getEnv("PGHOST") && !!getEnv("PGDATABASE") && !!getEnv("PGUSER") && !!getEnv("PGPASSWORD");
+  return (
+    !!getEnv("PGHOST") && !!getEnv("PGDATABASE") && !!getEnv("PGUSER") && !!getEnv("PGPASSWORD")
+  );
 }
 
 function getPool(): pg.Pool | undefined {
@@ -32,7 +34,7 @@ function getPool(): pg.Pool | undefined {
     user,
     password,
     ...(port ? { port: Number(port) } : {}),
-    ...(ssl ? { ssl } : {})
+    ...(ssl ? { ssl } : {}),
   });
 
   return pool;
@@ -68,7 +70,7 @@ export async function getHealthAdmin(token: string): Promise<HealthAdminResponse
     user,
     port,
     sslMode,
-    passwordSet: passwordSet ? "1" : "0"
+    passwordSet: passwordSet ? "1" : "0",
   });
 
   const out: HealthAdminResponse = {
@@ -84,8 +86,8 @@ export async function getHealthAdmin(token: string): Promise<HealthAdminResponse
       ...(database ? { database } : {}),
       ...(user ? { user } : {}),
       ...(port ? { port } : {}),
-      ...(sslMode ? { sslMode } : {})
-    }
+      ...(sslMode ? { sslMode } : {}),
+    },
   };
 
   const p = getPool();
@@ -124,7 +126,7 @@ export async function getHealthAdmin(token: string): Promise<HealthAdminResponse
         (select n from active_sessions) as active_sessions,
         (select n from revoked_sessions) as revoked_sessions,
         (select n from failed_last_hour) as failed_last_hour
-      `
+      `,
     );
 
     const q1 = Date.now();
@@ -141,10 +143,9 @@ export async function getHealthAdmin(token: string): Promise<HealthAdminResponse
     throw new AppError("Health admin query failed", {
       code: "INTERNAL_ERROR",
       status: 500,
-      details: { message: msg }
+      details: { message: msg },
     });
   } finally {
     client.release();
   }
 }
-
