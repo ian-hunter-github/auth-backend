@@ -6,11 +6,11 @@ import type {
   AuthRefreshResponse,
   AuthRegisterRequest,
   AuthRegisterResponse,
-  AuthUserProfile
+  AuthUserProfile,
 } from "../../../contracts/auth.js";
 import type { AuthProvider, CreateUserInput, UpdateUserInput } from "../providers/authProvider.js";
 import { fakeAuthProvider } from "../../../services/fakeAuthProvider.js";
-import { postgresAuthProvider } from "../../../services/postgresAuthProvider.js";
+import { postgresAuthProvider } from "../../../services/postgres/postgresAuthProvider.js";
 
 import { getEnv } from "../../../lib/env.js";
 import { requireRuntimeConfig } from "../../../security/runtimeConfig.js";
